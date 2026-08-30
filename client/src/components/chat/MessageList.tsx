@@ -50,7 +50,7 @@ export function MessageList({ messages, selfId, bottomInset }: Props) {
   };
 
   return (
-    <div className="relative flex-1 overflow-hidden">
+    <div className="relative h-full overflow-hidden">
       <div
         ref={scrollRef}
         onScroll={onScroll}
