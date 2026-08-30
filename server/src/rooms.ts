@@ -33,6 +33,10 @@ export interface Room {
   id: string;
   code: string;
   hostParticipantId: string;
+  /** True for the reserved "private room" (fixed code, preserved). */
+  isPrivate: boolean;
+  /** Per-room participant cap; reserved room uses 2 (owner + friend). */
+  maxParticipants: number;
   createdAt: number;
   expiresAt: number;
   /** Map of participant nonce -> participant. */
@@ -45,22 +49,35 @@ export interface Room {
 
 const rooms = new Map<string, Room>();
 
+export interface CreateRoomOptions {
+  code?: string;
+  ttlMs?: number;
+  maxParticipants?: number;
+  isPrivate?: boolean;
+}
+
 /** Create a new room and return it. The host participant is added by caller. */
-export function createRoom(): Room {
+export function createRoom(options: CreateRoomOptions = {}): Room {
   const now = Date.now();
   const id = randomRoomId();
   const room: Room = {
     id,
-    code: randomRoomCode(),
+    code: options.code ?? randomRoomCode(),
     hostParticipantId: "",
+    isPrivate: options.isPrivate ?? false,
+    maxParticipants: options.maxParticipants ?? config.maxRoomSize,
     createdAt: now,
-    expiresAt: now + config.roomTtlMs,
+    expiresAt: now + (options.ttlMs ?? config.roomTtlMs),
     participants: new Map(),
     sockets: new Map(),
     messages: [],
   };
   // Guard against a (vanishingly rare) id collision.
   while (rooms.has(room.id)) room.id = randomRoomId();
+  // A random code must never shadow the preserved private-room code.
+  while (!options.code && room.code === config.reservedRoomCode) {
+    room.code = randomRoomCode();
+  }
   rooms.set(id, room);
   return room;
 }
@@ -76,9 +93,30 @@ export function getRoom(id: string): Room | undefined {
 
 export function getRoomByCode(code: string): Room | undefined {
   for (const room of rooms.values()) {
-    if (room.code === code) return room;
+    if (room.code !== code) continue;
+    if (Date.now() > room.expiresAt) {
+      deleteRoom(room.id);
+      return undefined;
+    }
+    return room;
   }
   return undefined;
+}
+
+/**
+ * Return the preserved "private room" for the fixed code, creating it on
+ * demand if it was ever swept/expired. Because it is recreated lazily, the
+ * code never becomes stale — it is effectively reserved forever.
+ */
+export function getOrCreateReservedRoom(): Room {
+  const existing = getRoomByCode(config.reservedRoomCode);
+  if (existing) return existing;
+  return createRoom({
+    code: config.reservedRoomCode,
+    ttlMs: config.reservedRoomTtlMs,
+    maxParticipants: config.reservedRoomMaxSize,
+    isPrivate: true,
+  });
 }
 
 export function deleteRoom(id: string): boolean {
@@ -93,7 +131,7 @@ export function addParticipant(
   name: string,
   color: number,
 ): Participant | null {
-  if (room.participants.size >= config.maxRoomSize) return null;
+  if (room.participants.size >= room.maxParticipants) return null;
   const participant: Participant = {
     id: participantId,
     name,
@@ -243,8 +281,9 @@ export function toPublicRoom(room: Room, socketId: string, hostParticipantId: st
     id: room.id,
     code: room.code,
     createdAt: room.createdAt,
-    expiresAt: room.expiresAt,
-    isHost: pid === hostParticipantId,
+expiresAt: room.expiresAt,
+      isHost: pid === hostParticipantId,
+      isPrivate: room.isPrivate,
     participants: [...room.participants.values()].map((p) => ({
       id: p.id,
       name: p.name,

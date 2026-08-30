@@ -29,6 +29,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
     sessionId: session.id,
     name: session.name,
     color: session.color,
+    reservedRoomCode: config.reservedRoomCode,
   });
 
   socket.on("session:name", (raw) => {
@@ -54,7 +55,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
 
   socket.on("room:create", () => {
     const room = rooms.createRoom();
-    joinInternal(io, socket, room);
+    if (!joinInternal(io, socket, room)) return;
     socket.emit("room:created", { roomId: room.id, code: room.code });
     emitJoined(io, socket, room);
   });
@@ -63,16 +64,19 @@ export function attachHandlers(io: Server, socket: Socket): void {
     // Accept either a short code or a full room id (from a shared link).
     const code = typeof raw?.code === "string" ? normalizeCode(raw.code) : undefined;
     const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
+    // The reserved private-room code is always available — recreate on demand.
     const room = roomId
       ? rooms.getRoom(roomId)
-      : code
-        ? rooms.getRoomByCode(code)
-        : undefined;
+      : code === config.reservedRoomCode
+        ? rooms.getOrCreateReservedRoom()
+        : code
+          ? rooms.getRoomByCode(code)
+          : undefined;
     if (!room) {
       sendError(socket, { code: "room_not_found", message: "Room not found." });
       return;
     }
-    joinInternal(io, socket, room);
+    if (!joinInternal(io, socket, room)) return;
     emitJoined(io, socket, room);
   });
 
@@ -120,7 +124,7 @@ function joinInternal(
   io: Server,
   socket: Socket,
   room: rooms.Room,
-): void {
+): boolean {
   const session = getSession(socket);
   // If the socket is already in another room, leave it first.
   const existing = ROOM_MEMBERSHIP.get(socket);
@@ -131,10 +135,11 @@ function joinInternal(
   const participant = rooms.addParticipant(room, socket, session.id, session.name, session.color);
   if (!participant) {
     sendError(socket, { code: "room_full", message: "This room is full." });
-    return;
+    return false;
   }
   ROOM_MEMBERSHIP.set(socket, { room, pid: participant.id });
   socket.join(room.id);
+  return true;
 }
 
 function emitJoined(io: Server, socket: Socket, room: rooms.Room): void {
@@ -167,7 +172,8 @@ function leaveRoom(io: Server, socket: Socket, room: rooms.Room): void {
     io.to(room.id).emit("presence:left", { participantId: participant.id });
   }
   // Room becomes empty -> schedule expiry (grace period from last activity).
-  if (room.participants.size === 0) {
+  // The preserved private room is exempt so it stays reachable indefinitely.
+  if (room.participants.size === 0 && !room.isPrivate) {
     const graceEnd = Date.now() + config.roomGraceMs;
     if (graceEnd < room.expiresAt) room.expiresAt = graceEnd;
   }
