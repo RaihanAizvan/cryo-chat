@@ -1,52 +1,43 @@
 # Deployment
 
-Cryo Chat is split into two deployable parts:
+Cryo Chat is a monorepo with a React frontend and a Node+Socket.IO backend.
 
-- **Frontend** (React + Vite) → **Vercel**
-- **Backend** (Node + Express + Socket.IO) → a **persistent** Node host (Railway or Render)
+It can be hosted two ways:
 
-> The backend must run on a persistent host. It holds all room/message state **in
-> memory** and keeps WebSocket connections alive — Vercel functions are cold-started
-> and have no persistent memory, so the backend **cannot** be hosted on Vercel.
+1. **One Abasthan app** (recommended) — the server serves the built frontend and
+   the real-time backend on a single origin.
+2. **Split hosting** — frontend on Vercel, backend on a persistent Node host.
 
-## Backend (Socket.IO server)
+> The Socket.IO backend cannot run on serverless (e.g. Vercel functions): it holds
+> all room/message state in memory and keeps WebSocket connections alive.
 
-Host on Railway or Render (a long-lived Node process). No database is needed —
-all state is held in memory.
+## Option 1 — One Abasthan app (recommended)
 
-Set these environment variables:
+Abasthan runs a persistent Node web service, so the whole app fits in one service.
 
-| Variable | Suggested value | Notes |
-| --- | --- | --- |
-| `PORT` | (host-provided) | Railway/Render inject this automatically |
-| `CORS_ORIGIN` | `https://<your-app>.vercel.app` | Comma-separated list of allowed frontend origins |
-| `RESERVED_ROOM_CODE` | `99999999` | Fixed code for the always-available room (optional) |
-| `MAX_ROOM_SIZE` | `50` | Optional tuning |
-| `CLIENT_DIST` | *(leave unset)* | Do NOT serve the frontend from here in a split setup |
+- **Service type:** Web Service
+- **Runtime:** Node.js 22 (or 20/18)
+- **Root directory:** `./` (repo root)
+- **Build command:** `npm install && npm run build`
+- **Start command:** `npm start`
+- **Environment variables:**
+  - `PORT` — Abasthan injects this automatically; the server listens on it.
+  - `RESERVED_ROOM_CODE` — optional, default `99999999`.
+  - `MAX_ROOM_SIZE` — optional, default `50`.
+  - `CORS_ORIGIN` — optional; same-origin requests are allowed, so you generally
+    don't need this. Set it only if a separate site connects to the socket.
 
-Start command (Railway/Render): `npm start` (runs the `server` workspace).
+The server serves the built frontend from `client/dist` (built by the build
+command) and handles `/socket.io` WebSockets on the same domain — no CORS needed.
 
-### Render example
-- Type: **Web Service** (not Static Site)
-- Build command: `npm install`
-- Start command: `npm start`
-- Set `CORS_ORIGIN=https://<your-app>.vercel.app`
+## Option 2 — Backend on Abasthan, frontend on Vercel
 
-## Frontend (Vercel)
-
-1. In the Vercel dashboard, link the repo and set the **Root Directory** to `client`.
-   - The `client/vercel.json` handles the build (`npm run build` → `dist`).
-2. Add the `VITE_SERVER_URL` env var pointing at your backend:
-   - `VITE_SERVER_URL=https://<your-backend>.onrender.com` (or Railway URL)
-   - This makes the browser connect to the backend via Socket.IO.
-   - If unset, the frontend connects same-origin (useful for the all-in-one VPS setup).
+- **Abasthan (backend):** Web Service as above. Add
+  `CORS_ORIGIN=https://<your-app>.vercel.app`.
+- **Vercel (frontend):** set the dashboard root directory to `client`, then add
+  env var `VITE_SERVER_URL=https://<your-backend>.abasthan.app`.
+  The client connects to that URL via Socket.IO.
 
 ### Local development
-The Vite dev proxy already forwards `/socket.io` and `/health` to `localhost:4000`,
-so `VITE_SERVER_URL` is optional during local dev.
-
-## CORS
-
-The backend only allows websocket connections listed in `CORS_ORIGIN`. Make sure it
-includes your exact Vercel domain (and `http://localhost:5173` if you test against a
-remote backend locally).
+Vite (in `client/`) proxies `/socket.io` and `/health` to `localhost:4000`, so the
+app runs locally with `npm run dev`. No `VITE_SERVER_URL` needed.

@@ -31,6 +31,10 @@ export interface Config {
 const list = (v: string | undefined): string[] =>
   v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
 
+// Path to the built client, used when serving the frontend in production.
+// Defaults to <repo>/client/dist so a single Abasthan/VPS app can host both.
+const DEFAULT_CLIENT_DIST = new URL("../../client/dist", import.meta.url).pathname;
+
 export const config: Config = {
   port: Number(process.env.PORT ?? 4000),
   corsOrigin: list(process.env.CORS_ORIGIN) ?? ["http://localhost:5173"],
@@ -43,5 +47,5 @@ export const config: Config = {
   maxSocketsPerIp: Number(process.env.MAX_SOCKETS_PER_IP ?? 20),
   reservedRoomCode: process.env.RESERVED_ROOM_CODE ?? "99999999",
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 30_000),
-  clientDist: process.env.CLIENT_DIST ?? null,
+  clientDist: process.env.CLIENT_DIST ?? DEFAULT_CLIENT_DIST,
 };

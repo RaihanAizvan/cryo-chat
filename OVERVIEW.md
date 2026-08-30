@@ -16,10 +16,11 @@ short while, then vanish. Like a chat that self-destructs.
                                          (rooms, messages, presence)
 ```
 
-- **Frontend** — React + Vite + Tailwind. Hosted on **Vercel**.
+- **Frontend** — React + Vite + Tailwind.
 - **Backend** — Node + Express + **Socket.IO**, holds everything **in memory**.
-  Hosted on a **persistent** host (Railway/Render) because WebSocket rooms and
-  state can't survive serverless cold starts.
+  Runs on a **persistent** host (new: **Abasthan**) because WebSocket rooms and
+  state can't survive serverless cold starts. The server also serves the built
+  frontend, so the whole app runs from a single Abasthan app.
 - **Shared** — one small `@cryo/shared` package with the message/room protocol
   types used by both sides.
 - Live via WebSocket: messages, who's online, join/leave, read receipts.
@@ -31,6 +32,6 @@ short while, then vanish. Like a chat that self-destructs.
 - Instagram-style emoji picker + WhatsApp-style large emoji messages.
 
 ## Workspaces
-- `client/` — React app (deploys to Vercel, root dir = `client`).
-- `server/` — Socket.IO server (persistent host, `npm start`).
+- `client/` — React app (builds to `client/dist`, served by the backend).
+- `server/` — Socket.IO server (the one Abasthan web service, `npm start`).
 - `shared/` — shared protocol types.
