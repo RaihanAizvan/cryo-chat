@@ -7,7 +7,8 @@ import {
   clearRoomHistory,
   type HistoryEntry,
 } from "../../lib/roomHistory";
-import { timeAgo, formatRemaining } from "../../lib/format";
+import { timeAgo, formatCountdown } from "../../lib/format";
+import { useNow } from "../../hooks/useNow";
 import { IconUsers, IconX, IconArrowRight, IconCheck, IconLink } from "../ui/Icon";
 import { roomShareLink } from "../chat/ShareRoom";
 
@@ -26,7 +27,7 @@ function HistoryCard({
   onJoin: (id: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const now = Date.now();
+  const now = useNow(1000);
   const live = roomStatus(entry, now) === "live";
 
   const copyLink = async () => {
@@ -83,9 +84,10 @@ function HistoryCard({
               {entry.lastParticipants || 1}{" "}
               {entry.lastParticipants === 1 ? "person" : "people"}
             </span>
-            <span>{live ? formatRemaining(entry.expiresAt, now) : "room vanished"}</span>
-            <span>· {timeAgo(entry.lastVisitedAt, now)}</span>
-          </div>
+            <span className="font-mono tabular-nums">
+              {live ? `expires in ${formatCountdown(entry.expiresAt, now)}` : "room vanished"}
+            </span>
+            <span>· {timeAgo(entry.lastVisitedAt, now)}</span>          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -130,7 +132,7 @@ function HistoryCard({
 
 export function RecentRooms({ onJoin }: Props) {
   const history = useRoomHistory();
-  const now = Date.now();
+  const now = useNow(1000);
 
   if (history.length === 0) return null;
 

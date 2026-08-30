@@ -55,6 +55,17 @@ export function formatRemaining(expiresAt: number, now = Date.now()): string {
   return `ends in ${formatLeftover(ms)}`;
 }
 
+/** Live countdown with seconds, e.g. "1:23:45" (or "MM:SS" under an hour). */
+export function formatCountdown(expiresAt: number, now = Date.now()): string {
+  const totalSec = Math.max(0, Math.floor((expiresAt - now) / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const mm = m.toString().padStart(2, "0");
+  const ss = s.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0) return "?";
