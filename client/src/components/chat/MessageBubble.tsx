@@ -54,7 +54,12 @@ export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
               {formatTime(message.sentAt)}
               {mine &&
                 (seen ? (
-                  <IconDoubleTick width={12} height={12} strokeWidth={2.4} className="-mr-0.5" />
+                  <IconDoubleTick
+                    width={13}
+                    height={13}
+                    strokeWidth={2.2}
+                    className="-mr-0.5 text-emerald-300"
+                  />
                 ) : (
                   <IconCheck width={11} height={11} strokeWidth={2.4} />
                 ))}
