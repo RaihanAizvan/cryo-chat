@@ -40,6 +40,13 @@ export const IconCheck = (p: P) => (
   </svg>
 );
 
+export const IconDoubleTick = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="m1.5 12.5 4.5 4.5L14 8.5" />
+    <path d="m6.5 13.5 2 2L18 6.5" />
+  </svg>
+);
+
 export const IconLink = (p: P) => (
   <svg {...base} {...p}>
     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />

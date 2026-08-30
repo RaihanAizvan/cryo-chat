@@ -49,7 +49,12 @@ export function ChatRoom({ state, actions }: Props) {
             <ShareRoom room={room} participants={participants} selfId={selfId} />
           </div>
         ) : (
-          <MessageList messages={messages} selfId={selfId} bottomInset={bottomInset} />
+          <MessageList
+            messages={messages}
+            selfId={selfId}
+            hasOthers={participants.some((p) => p.id !== selfId)}
+            bottomInset={bottomInset}
+          />
         )}
       </div>
 

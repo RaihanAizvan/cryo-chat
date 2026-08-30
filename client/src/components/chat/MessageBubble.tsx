@@ -1,14 +1,17 @@
 import type { PublicMessage } from "@cryo/shared";
 import { Avatar } from "../ui/Avatar";
 import { formatTime } from "../../lib/format";
+import { IconCheck, IconDoubleTick } from "../ui/Icon";
 
 interface Props {
   message: PublicMessage;
   mine: boolean;
   firstInGroup: boolean;
+  /** True when a recipient is present in the room, meaning the message was seen. */
+  seen?: boolean;
 }
 
-export function MessageBubble({ message, mine, firstInGroup }: Props) {
+export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
   const showName = !mine && firstInGroup;
 
   return (
@@ -44,11 +47,17 @@ export function MessageBubble({ message, mine, firstInGroup }: Props) {
           >
             {message.text}
             <span
-              className={`ml-1.5 block whitespace-nowrap pt-1 text-right text-[9px] leading-none ${
+              className={`ml-1.5 flex items-center justify-end gap-0.5 whitespace-nowrap pt-1 text-right text-[9px] leading-none ${
                 mine ? "text-white/60" : "text-ink-faint"
               }`}
             >
               {formatTime(message.sentAt)}
+              {mine &&
+                (seen ? (
+                  <IconDoubleTick width={12} height={12} strokeWidth={2.4} className="-mr-0.5" />
+                ) : (
+                  <IconCheck width={11} height={11} strokeWidth={2.4} />
+                ))}
             </span>
           </div>
         </div>

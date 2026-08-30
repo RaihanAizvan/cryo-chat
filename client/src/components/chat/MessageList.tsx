@@ -7,6 +7,7 @@ import { MessageBubble } from "./MessageBubble";
 interface Props {
   messages: PublicMessage[];
   selfId: string | null;
+  hasOthers: boolean;
   bottomInset: number;
 }
 
@@ -20,7 +21,7 @@ function shouldGroup(prev: PublicMessage | undefined, cur: PublicMessage | undef
   return sameMinute(prev.sentAt, cur.sentAt) || cur.sentAt - prev.sentAt < 3 * 60_000;
 }
 
-export function MessageList({ messages, selfId, bottomInset }: Props) {
+export function MessageList({ messages, selfId, hasOthers, bottomInset }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
@@ -100,6 +101,7 @@ export function MessageList({ messages, selfId, bottomInset }: Props) {
                   message={m}
                   mine={mine}
                   firstInGroup={firstInGroup}
+                  seen={mine && hasOthers}
                 />
               </Fragment>
             );
