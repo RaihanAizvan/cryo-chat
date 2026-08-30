@@ -62,12 +62,20 @@ export function MessageList({ messages, selfId, bottomInset }: Props) {
             const mine = m.participantId === selfId;
             const prev = messages[i - 1];
             const firstInGroup = !shouldGroup(prev, m);
-            // Show a centered time divider above a message when it's the first
-            // in the chat or when it arrived more than ~2 minutes after the
-            // previous message.
+            // The divider compares against the previous *user* message (not a
+            // transient join/left pill), so it shows for the first real message
+            // and whenever a gap of ~2 minutes has passed.
+            let prevUserSentAt: number | null = null;
+            for (let p = i - 1; p >= 0; p--) {
+              if (messages[p].kind !== "system") {
+                prevUserSentAt = messages[p].sentAt;
+                break;
+              }
+            }
             const showDivider =
               m.kind !== "system" &&
-              (i === 0 || m.sentAt - (prev?.sentAt ?? 0) >= 2 * 60_000);
+              (prevUserSentAt === null ||
+                m.sentAt - prevUserSentAt >= 2 * 60_000);
 
             if (m.kind === "system") {
               return (
