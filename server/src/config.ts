@@ -20,12 +20,8 @@ export interface Config {
   messageRateLimit: number;
   /** Max concurrent sockets per IP. */
   maxSocketsPerIp: number;
-  /** Fixed code for the preserved "private room" (easy to remember). */
+  /** Fixed code for the preserved room (easy to remember). */
   reservedRoomCode: string;
-  /** How long the private room lingers even when empty, in ms. */
-  reservedRoomTtlMs: number;
-  /** Max participants in the private room (the owner + their friend). */
-  reservedRoomMaxSize: number;
   /** Sweep interval for expiry/cleanup. */
   sweepIntervalMs: number;
   /** If set, serve the built client from this directory (production). */
@@ -46,8 +42,6 @@ export const config: Config = {
   messageRateLimit: Number(process.env.MESSAGE_RATE_LIMIT ?? 10),
   maxSocketsPerIp: Number(process.env.MAX_SOCKETS_PER_IP ?? 20),
   reservedRoomCode: process.env.RESERVED_ROOM_CODE ?? "99999999",
-  reservedRoomTtlMs: Number(process.env.RESERVED_ROOM_TTL_MS ?? 1000 * 60 * 60 * 24 * 7),
-  reservedRoomMaxSize: Number(process.env.RESERVED_ROOM_MAX_SIZE ?? 2),
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 30_000),
   clientDist: process.env.CLIENT_DIST ?? null,
 };

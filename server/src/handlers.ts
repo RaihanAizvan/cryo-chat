@@ -29,7 +29,6 @@ export function attachHandlers(io: Server, socket: Socket): void {
     sessionId: session.id,
     name: session.name,
     color: session.color,
-    reservedRoomCode: config.reservedRoomCode,
   });
 
   socket.on("session:name", (raw) => {
@@ -64,7 +63,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
     // Accept either a short code or a full room id (from a shared link).
     const code = typeof raw?.code === "string" ? normalizeCode(raw.code) : undefined;
     const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
-    // The reserved private-room code is always available — recreate on demand.
+    // The reserved code always works — recreate the room on demand.
     const room = roomId
       ? rooms.getRoom(roomId)
       : code === config.reservedRoomCode
@@ -172,8 +171,7 @@ function leaveRoom(io: Server, socket: Socket, room: rooms.Room): void {
     io.to(room.id).emit("presence:left", { participantId: participant.id });
   }
   // Room becomes empty -> schedule expiry (grace period from last activity).
-  // The preserved private room is exempt so it stays reachable indefinitely.
-  if (room.participants.size === 0 && !room.isPrivate) {
+  if (room.participants.size === 0) {
     const graceEnd = Date.now() + config.roomGraceMs;
     if (graceEnd < room.expiresAt) room.expiresAt = graceEnd;
   }

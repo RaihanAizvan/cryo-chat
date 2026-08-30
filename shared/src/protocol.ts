@@ -28,13 +28,7 @@ export interface ClientToServerEventMap {
 /** Server -> Client events. */
 export interface ServerToClientEventMap {
   /** Initial connection handshake with the temporary identity. */
-  "session:init": {
-    sessionId: string;
-    name: string;
-    color: AvatarColor;
-    /** Fixed code of the preserved "private room", always available to join. */
-    reservedRoomCode: string;
-  };
+  "session:init": { sessionId: string; name: string; color: AvatarColor };
   /** Name changed/confirmed (echo back the sanitized server view). */
   "session:name:updated": { name: string };
   /** Ack when a room was created. */
@@ -144,6 +138,4 @@ export interface PublicRoom {
   participants: Participant[];
   /** True if the requesting client is the room host. */
   isHost: boolean;
-  /** True for the reserved "private room" (fixed code, persists, max 2). */
-  isPrivate?: boolean;
 }
