@@ -1,5 +1,6 @@
 import type { PublicMessage } from "@cryo/shared";
 import { Avatar } from "../ui/Avatar";
+import { formatTime } from "../../lib/format";
 
 interface Props {
   message: PublicMessage;
@@ -35,13 +36,20 @@ export function MessageBubble({ message, mine, firstInGroup }: Props) {
         )}
         <div className="cryo-in flex items-end gap-1.5">
           <div
-            className={`whitespace-pre-wrap [overflow-wrap:anywhere] px-3.5 py-2 text-[15px] leading-relaxed ${
+            className={`whitespace-pre-wrap [overflow-wrap:anywhere] px-3.5 py-2 pb-1.5 text-[15px] leading-relaxed ${
               mine
                 ? "rounded-bubble rounded-br-md bg-accent text-white"
                 : "rounded-bubble rounded-bl-md border border-base-border bg-base-raised text-ink"
             }`}
           >
             {message.text}
+            <span
+              className={`ml-1.5 block whitespace-nowrap pt-1 text-right text-[9px] leading-none ${
+                mine ? "text-white/60" : "text-ink-faint"
+              }`}
+            >
+              {formatTime(message.sentAt)}
+            </span>
           </div>
         </div>
       </div>
