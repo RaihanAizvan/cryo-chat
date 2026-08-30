@@ -29,7 +29,10 @@ export function Modal({ onClose, children, title }: ModalProps) {
       aria-label={title}
       onClick={onClose}
     >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
       <div
         className="cryo-pop relative z-10 w-full max-w-md rounded-t-3xl border border-base-border2 bg-base-raised p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] shadow-2xl sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
