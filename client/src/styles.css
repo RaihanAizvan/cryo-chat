@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  /* Dynamic viewport height tracks the mobile URL bar; dvh.props fall back gracefully. */
+  html {
+    height: 100dvh;
+  }
+  html,
+  body,
+  #root {
+    min-height: 100dvh;
+  }
+
+  body {
+    @apply bg-base text-ink font-sans antialiased;
+    overscroll-behavior: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Respect safe areas for notched devices. */
+  #root {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Focus rings that are visible but not jarring. */
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, theme(colors.accent.DEFAULT) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, theme(colors.accent.DEFAULT) 30%, transparent);
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar on the message list for a clean look on desktop. */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Respect reduced motion preferences. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* Subtle message appearance transition. */
+@keyframes cryo-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cryo-in {
+  animation: cryo-in 160ms ease-out both;
+}
+
+@keyframes cryo-pop {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.cryo-pop {
+  animation: cryo-pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
