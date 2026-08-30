@@ -1,0 +1,14 @@
+{
+  "name": "@cryo/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/protocol.ts",
+  "types": "src/protocol.ts",
+  "exports": {
+    ".": "./src/protocol.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
