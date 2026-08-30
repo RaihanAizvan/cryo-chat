@@ -31,13 +31,19 @@ export interface Config {
 const list = (v: string | undefined): string[] =>
   v ? v.split(",").map((s) => s.trim()).filter(Boolean) : [];
 
+/** Comma-separated origins, falling back to local dev when unset/empty. */
+const corsOriginList = (v: string | undefined): string[] => {
+  const parsed = list(v);
+  return parsed.length > 0 ? parsed : ["http://localhost:5173"];
+};
+
 // Path to the built client, used when serving the frontend in production.
 // Defaults to <repo>/client/dist so a single Abasthan/VPS app can host both.
 const DEFAULT_CLIENT_DIST = new URL("../../client/dist", import.meta.url).pathname;
 
 export const config: Config = {
   port: Number(process.env.PORT ?? 4000),
-  corsOrigin: list(process.env.CORS_ORIGIN) ?? ["http://localhost:5173"],
+  corsOrigin: corsOriginList(process.env.CORS_ORIGIN),
   messageTtlMs: Number(process.env.MESSAGE_TTL_MS ?? 1000 * 60 * 60 * 24),
   roomTtlMs: Number(process.env.ROOM_TTL_MS ?? 1000 * 60 * 60 * 2),
   roomGraceMs: Number(process.env.ROOM_GRACE_MS ?? 1000 * 60 * 30),
