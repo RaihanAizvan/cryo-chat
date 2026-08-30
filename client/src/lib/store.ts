@@ -8,7 +8,13 @@ import { io, type Socket } from "socket.io-client";
 import type { AvatarColor } from "@cryo/shared";
 import { getStoredDisplayName } from "./prefs";
 
-export const socket: Socket = io({ autoConnect: false });
+// When VITE_SERVER_URL is set (e.g. Vercel frontend + external backend), the
+// client connects there; otherwise it falls back to the same-origin proxy.
+const serverUrl = import.meta.env.VITE_SERVER_URL?.trim();
+export const socket: Socket = io(serverUrl || "/", {
+  autoConnect: false,
+  path: "/socket.io",
+});
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
 
