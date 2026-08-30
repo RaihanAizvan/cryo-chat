@@ -42,8 +42,6 @@ interface SessionState {
   sessionId: string | null;
   name: string | null;
   color: AvatarColor;
-  /** Fixed code of the preserved "private room" (from the server). */
-  reservedRoomCode: string | null;
 }
 
 const connectionStatus = new ExternalStore<ConnectionStatus>("connecting");
@@ -52,7 +50,6 @@ const session = new ExternalStore<SessionState>({
   sessionId: null,
   name: null,
   color: 0,
-  reservedRoomCode: null,
 });
 
 socket.on("connect", () => {
@@ -80,7 +77,6 @@ socket.on("session:init", (data) => {
     sessionId: data.sessionId,
     name: data.name,
     color: data.color,
-    reservedRoomCode: data.reservedRoomCode ?? null,
   });
   connectionStatus.set("connected");
 

@@ -51,11 +51,7 @@ export function ChatHeader({ room, participantCount, notice, onBack, onLeave }: 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-semibold text-ink">
-              {room.isPrivate
-                ? "Private room"
-                : participantCount === 2
-                  ? "Private chat"
-                  : `Room · ${participantCount}`}
+              {participantCount === 2 ? "Private chat" : `Room · ${participantCount}`}
             </span>
             <span className="rounded-md bg-base-border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-ink-muted">
               {room.code}

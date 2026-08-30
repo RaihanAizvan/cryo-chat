@@ -86,9 +86,7 @@ function HistoryCard({
             </span>
             <span className="font-mono tabular-nums">
               {live
-                ? entry.isPrivate
-                  ? "always open"
-                  : `expires in ${formatCountdown(entry.expiresAt, now)}`
+                ? `expires in ${formatCountdown(entry.expiresAt, now)}`
                 : "room vanished"}
             </span>
             <span>· {timeAgo(entry.lastVisitedAt, now)}</span>          </div>
