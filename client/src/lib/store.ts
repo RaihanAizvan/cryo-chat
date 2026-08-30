@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from "react";
 import { io, type Socket } from "socket.io-client";
 import type { AvatarColor } from "@cryo/shared";
+import { getStoredDisplayName } from "./prefs";
 
 export const socket: Socket = io({ autoConnect: false });
 
@@ -41,6 +42,8 @@ interface SessionState {
   sessionId: string | null;
   name: string | null;
   color: AvatarColor;
+  /** Fixed code of the preserved "private room" (from the server). */
+  reservedRoomCode: string | null;
 }
 
 const connectionStatus = new ExternalStore<ConnectionStatus>("connecting");
@@ -49,6 +52,7 @@ const session = new ExternalStore<SessionState>({
   sessionId: null,
   name: null,
   color: 0,
+  reservedRoomCode: null,
 });
 
 socket.on("connect", () => {
@@ -76,8 +80,14 @@ socket.on("session:init", (data) => {
     sessionId: data.sessionId,
     name: data.name,
     color: data.color,
+    reservedRoomCode: data.reservedRoomCode ?? null,
   });
   connectionStatus.set("connected");
+
+  // A display name the user saved earlier takes precedence over the random
+  // one the server just assigned.
+  const stored = getStoredDisplayName();
+  if (stored) socket.emit("session:name", { name: stored });
 });
 
 socket.on("session:name:updated", (data) => {

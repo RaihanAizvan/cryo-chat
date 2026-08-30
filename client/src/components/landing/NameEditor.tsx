@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MAX_NAME_LENGTH } from "@cryo/shared";
 import { updateDisplayName } from "../../lib/store";
+import { setStoredDisplayName } from "../../lib/prefs";
 import { Modal } from "../ui/Modal";
 import { IconX } from "../ui/Icon";
 
@@ -15,6 +16,7 @@ export function NameEditor({ initial, onClose }: Props) {
   const submit = () => {
     const trimmed = name.trim();
     if (trimmed) {
+      setStoredDisplayName(trimmed);
       updateDisplayName(trimmed);
       onClose();
     }

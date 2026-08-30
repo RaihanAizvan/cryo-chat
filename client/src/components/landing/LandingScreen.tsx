@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSession, useConnectionStatus, connectAndInit } from "../../lib/store";
+import { getStoredDisplayName } from "../../lib/prefs";
 import { Avatar } from "../ui/Avatar";
 import { IconArrowRight, IconPlus, IconLink } from "../ui/Icon";
 import { JoinRoom } from "./JoinRoom";
@@ -28,6 +29,7 @@ export function LandingScreen({ state, actions }: Props) {
 
   const connected = connection === "connected";
   const pending = connection === "connecting" || connection === "reconnecting";
+  const privateRoomCode = session.reservedRoomCode;
 
   return (
     <div className="flex min-h-full flex-col">
@@ -80,6 +82,35 @@ export function LandingScreen({ state, actions }: Props) {
         </div>
       </div>
 
+      {/* Preserved private room for you and a friend */}
+      {privateRoomCode && (
+        <div className="w-full px-6 pb-3">
+          <div className="relative overflow-hidden rounded-2xl border border-accent/30 bg-accent/5 px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wider text-accent">
+                  Your private room
+                </p>
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  Just you and a friend. This code always works.
+                </p>
+                <div className="mt-2.5 inline-flex items-center gap-1 rounded-lg border border-base-border2 bg-base px-2.5 py-1 font-mono text-[13px] font-semibold tracking-[0.3em] text-ink">
+                  {privateRoomCode.slice(0, 4)} {privateRoomCode.slice(4)}
+                </div>
+              </div>
+              <button
+                onClick={() => actions.joinRoom(privateRoomCode)}
+                disabled={!connected}
+                className="flex shrink-0 items-center gap-1.5 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-transform active:scale-[0.98] disabled:opacity-40"
+              >
+                Enter
+                <IconArrowRight width={15} height={15} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Recently visited rooms */}
       <div className="flex flex-1 flex-col overflow-y-auto">
         <RecentRooms onJoin={actions.joinRoom} />
@@ -118,7 +149,10 @@ export function LandingScreen({ state, actions }: Props) {
       )}
 
       {editName && (
-        <NameEditor initial={session.name ?? ""} onClose={() => setEditName(false)} />
+        <NameEditor
+          initial={getStoredDisplayName() ?? session.name ?? ""}
+          onClose={() => setEditName(false)}
+        />
       )}
     </div>
   );

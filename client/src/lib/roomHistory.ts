@@ -32,6 +32,8 @@ export interface HistoryEntry {
   /** Last known number of participants. */
   lastParticipants: number;
   isHost: boolean;
+  /** True for the preserved "private room" (fixed code, always available). */
+  isPrivate?: boolean;
 }
 
 type Listener = () => void;
@@ -66,6 +68,7 @@ class RoomHistoryStore {
       expiresAt: room.expiresAt,
       lastParticipants: room.participants.length,
       isHost: meta.isHost,
+      isPrivate: room.isPrivate ?? false,
     };
     if (idx >= 0) this.entries.splice(idx, 1);
     this.entries.unshift(entry);
@@ -86,6 +89,7 @@ class RoomHistoryStore {
       lastVisitedAt: Date.now(),
       lastParticipants: participantCount,
       expiresAt: room.expiresAt,
+      isPrivate: room.isPrivate ?? e.isPrivate,
     };
     this.entries.splice(idx, 1);
     this.entries.unshift(updated);

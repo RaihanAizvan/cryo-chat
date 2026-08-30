@@ -85,7 +85,11 @@ function HistoryCard({
               {entry.lastParticipants === 1 ? "person" : "people"}
             </span>
             <span className="font-mono tabular-nums">
-              {live ? `expires in ${formatCountdown(entry.expiresAt, now)}` : "room vanished"}
+              {live
+                ? entry.isPrivate
+                  ? "always open"
+                  : `expires in ${formatCountdown(entry.expiresAt, now)}`
+                : "room vanished"}
             </span>
             <span>· {timeAgo(entry.lastVisitedAt, now)}</span>          </div>
         </div>
