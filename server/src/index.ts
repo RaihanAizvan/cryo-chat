@@ -7,6 +7,7 @@ import http from "node:http";
 import { Server } from "socket.io";
 import { config } from "./config.js";
 import { createHttpApp } from "./http.js";
+import { socketIoCors } from "./cors.js";
 import { attachHandlers, startSweeper } from "./handlers.js";
 import { destroy } from "./sessions.js";
 
@@ -14,10 +15,7 @@ const app = createHttpApp();
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: {
-    origin: config.corsOrigin,
-    methods: ["GET", "POST"],
-  },
+  cors: socketIoCors,
   serveClient: false,
 });
 

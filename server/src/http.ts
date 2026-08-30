@@ -8,24 +8,13 @@ import cors from "cors";
 import path from "node:path";
 import fs from "node:fs";
 import { config } from "./config.js";
+import { expressCorsOptions } from "./cors.js";
 
 export function createHttpApp(): express.Express {
   const app = express();
   app.disable("x-powered-by");
 
-  app.use(
-    cors({
-      origin: (origin, cb) => {
-        // Allow non-browser clients (no origin) and requests on the allowlist.
-        if (!origin || config.corsOrigin.includes(origin)) {
-          cb(null, true);
-        } else {
-          cb(new Error("Not allowed by CORS"));
-        }
-      },
-      credentials: false,
-    }),
-  );
+  app.use(cors(expressCorsOptions));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
