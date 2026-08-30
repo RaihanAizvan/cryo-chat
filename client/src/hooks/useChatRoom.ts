@@ -6,6 +6,7 @@ import type {
   ErrorPayload,
 } from "@cryo/shared";
 import { connectAndInit, socket } from "../lib/store";
+import { recordRoomHistory, touchRoomHistory } from "../lib/roomHistory";
 
 export interface RoomState {
   room: PublicRoom | null;
@@ -52,6 +53,12 @@ export function useChatRoom(): [RoomState, RoomActions] {
     setRoom(r);
     setMessages(msgs);
     setParticipants(r.participants);
+    recordRoomHistory(r, { isHost: r.isHost });
+  }, []);
+
+  const touchHistory = useCallback(() => {
+    const r = roomRef.current;
+    if (r) touchRoomHistory(r, participantsRef.current.length);
   }, []);
 
   const exitRoom = useCallback(() => {
@@ -83,12 +90,14 @@ export function useChatRoom(): [RoomState, RoomActions] {
         data.participant,
       ];
       setParticipants(participantsRef.current);
+      touchHistory();
     };
     const onPresenceLeft = (data: { participantId: string }) => {
       participantsRef.current = participantsRef.current.filter(
         (p) => p.id !== data.participantId,
       );
       setParticipants(participantsRef.current);
+      touchHistory();
     };
     const onPresenceRenamed = (data: { participantId: string; name: string }) => {
       participantsRef.current = participantsRef.current.map((p) =>
@@ -139,7 +148,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       socket.off("room:expired", onExpired);
       socket.off("error", onError);
     };
-  }, [enterRoom, exitRoom]);
+  }, [enterRoom, exitRoom, touchHistory]);
 
   const createRoom = useCallback(() => {
     setJoinError(null);

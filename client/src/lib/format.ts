@@ -35,6 +35,26 @@ export function formatLeftover(ms: number): string {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/** Short "time ago" label for the last-visited line, e.g. "just now", "3m", "2h". */
+export function timeAgo(ts: number, now = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - ts) / 1000));
+  if (s < 10) return "just now";
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+/** Remaining lifetime label for a live room, e.g. "ends in 45m". */
+export function formatRemaining(expiresAt: number, now = Date.now()): string {
+  const ms = expiresAt - now;
+  if (ms <= 0) return "expired";
+  return `ends in ${formatLeftover(ms)}`;
+}
+
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0) return "?";
