@@ -4,17 +4,16 @@
  */
 
 import express from "express";
-import cors from "cors";
 import path from "node:path";
 import fs from "node:fs";
 import { config } from "./config.js";
-import { expressCorsOptions } from "./cors.js";
+import { corsMiddleware } from "./cors.js";
 
 export function createHttpApp(): express.Express {
   const app = express();
   app.disable("x-powered-by");
 
-  app.use(cors(expressCorsOptions));
+  app.use(corsMiddleware);
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
