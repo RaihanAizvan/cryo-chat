@@ -1,9 +1,15 @@
 /**
  * Anonymous session manager.
  *
- * A session is a temporary identity bound to a socket.io connection. It is NOT
- * a permanent user account. The concept is kept separate from "participant" so
- * that future features (persistence, matchmaking) can evolve independently.
+ * A session is a temporary identity that outlives a single socket connection.
+ * It is NOT a permanent user account. The concept is kept separate from
+ * "participant" so that future features (persistence, matchmaking) can evolve
+ * independently.
+ *
+ * Identity reuse: the client persists its session id (localStorage) and sends
+ * it as a connection query. The server keeps issued identities in a store that
+ * survives disconnect, so a re-join after a page reload reuses the same id.
+ * That keeps a user's own historical messages aligned to the right.
  */
 
 import { randomUUID } from "node:crypto";
@@ -17,29 +23,32 @@ export interface Session {
   createdAt: number;
 }
 
+/** Active bindings: socket.id -> session currently using it. */
 const sessions = new Map<Socket["id"], Session>();
-// Session id -> socket id(s) currently using it. Lets us reuse the same
-// identity across reconnects/room changes so a user's own messages keep
-// aligning to the right.
-const sessionById = new Map<string, Socket["id"]>();
 
-const SESSION_NAMESPACE = "cryo:session";
+/** Issued identities: session.id -> session. Survives disconnects. */
+const identities = new Map<string, Session>();
+
+/** Only UUID-shaped ids are accepted for resume (avoids spoofing). */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** How long a disconnected identity stays reusable before pruning. */
+const IDENTITY_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+/** Cap on retained identities to bound memory. */
+const IDENTITY_MAX = 4_000;
 
 /**
- * Lazily create and cache a session for a socket. If the client asks to resume
- * a previous session id (persisted on-device), reuse that identity so their
- * historical messages stay "theirs". The requested id is only trusted if it's
- * a valid UUID (we don't accept arbitrary strings).
+ * Lazily create and cache a session for a socket, resuming a previously issued
+ * id when the client asks for it (and it's still known/valid).
  */
 export function getSession(socket: Socket, requestedId?: unknown): Session {
   const cached = sessions.get(socket.id);
   if (cached) return cached;
 
-  // Try to resume a previously issued session id.
   const wantId = typeof requestedId === "string" ? requestedId : undefined;
-  const existingHolder = wantId ? sessionById.get(wantId) : undefined;
-  if (wantId && existingHolder && sessions.has(existingHolder)) {
-    const resumed = sessions.get(existingHolder)!;
+  const resumed = wantId && UUID_RE.test(wantId) ? identities.get(wantId) : undefined;
+  if (resumed) {
     sessions.set(socket.id, resumed);
     return resumed;
   }
@@ -51,8 +60,9 @@ export function getSession(socket: Socket, requestedId?: unknown): Session {
     createdAt: Date.now(),
   };
   session.color = colorFor(session.name);
+  identities.set(session.id, session);
   sessions.set(socket.id, session);
-  sessionById.set(session.id, socket.id);
+  pruneIdentities();
   return session;
 }
 
@@ -66,15 +76,17 @@ export function updateName(socket: Socket, raw: unknown): Session | null {
 }
 
 export function destroy(socket: Socket): void {
-  const session = sessions.get(socket.id);
   sessions.delete(socket.id);
-  if (session) {
-    // Only clear the by-id mapping if this socket was its holder.
-    if (sessionById.get(session.id) === socket.id) {
-      sessionById.delete(session.id);
+  // The identity is intentionally KEPT so a reconnect can resume it.
+}
+
+/** Remove stale/oversized identities that no longer need to be resumable. */
+function pruneIdentities(): void {
+  if (identities.size < IDENTITY_MAX) return;
+  const now = Date.now();
+  for (const [id, s] of identities) {
+    if (now - s.createdAt > IDENTITY_TTL_MS || identities.size > IDENTITY_MAX) {
+      identities.delete(id);
     }
   }
 }
-
-/** Symbol used to pin a session reference onto the socket. */
-export const SESSION_KEY = Symbol.for(SESSION_NAMESPACE);
