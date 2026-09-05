@@ -6,14 +6,18 @@
 import { useSyncExternalStore } from "react";
 import { io, type Socket } from "socket.io-client";
 import type { AvatarColor } from "@cryo/shared";
-import { getStoredDisplayName } from "./prefs";
+import { getStoredDisplayName, getStoredSessionId, setStoredSessionId } from "./prefs";
 
 // When VITE_SERVER_URL is set (e.g. Vercel frontend + external backend), the
 // client connects there; otherwise it falls back to the same-origin proxy.
 const serverUrl = import.meta.env.VITE_SERVER_URL?.trim();
+// Reuse a previously persisted session id so reconnects keep the same identity
+// (keeps the user's own historical messages right-aligned).
+const savedSessionId = getStoredSessionId();
 export const socket: Socket = io(serverUrl || "/", {
   autoConnect: false,
   path: "/socket.io",
+  query: savedSessionId ? { sessionId: savedSessionId } : undefined,
 });
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
@@ -85,6 +89,8 @@ socket.on("session:init", (data) => {
     color: data.color,
   });
   connectionStatus.set("connected");
+  // Remember our identity so reconnects/reloads keep the same session.
+  if (data.sessionId) setStoredSessionId(data.sessionId);
 
   // A display name the user saved earlier takes precedence over the random
   // one the server just assigned.

@@ -10,8 +10,7 @@
 import type { Server, Socket } from "socket.io";
 import type { ErrorPayload } from "@cryo/shared";
 import { config } from "./config.js";
-import { getSession, updateName } from "./sessions.js";
-import * as rooms from "./rooms.js";
+import { getSession, updateName } from "./sessions.js";import * as rooms from "./rooms.js";
 import { normalizeMessage, RateLimiter } from "./validation.js";
 import { normalizeCode } from "./util.js";
 
@@ -24,7 +23,9 @@ const messageLimiter = new RateLimiter(
 const ROOM_MEMBERSHIP = new WeakMap<Socket, { room: rooms.Room; pid: string }>();
 
 export function attachHandlers(io: Server, socket: Socket): void {
-  const session = getSession(socket);
+  // Allow resuming a persisted session id (sent as a connection query).
+  const requestedSessionId = (socket.handshake.query?.sessionId as string | undefined);
+  const session = getSession(socket, requestedSessionId);
   socket.emit("session:init", {
     sessionId: session.id,
     name: session.name,
