@@ -9,16 +9,22 @@ interface Props {
   selfId: string | null;
 }
 
-export function roomShareLink(roomId: string): string {
+export function roomShareLink(room: {
+  id: string;
+  code: string;
+  persistent: boolean;
+}): string {
   const base = window.location.origin;
-  return `${base}/r/${roomId}`;
+  // The special room is best shared by its stable code URL (/99999999), which
+  // keeps working even after the room has been closed and recreated.
+  return room.persistent ? `${base}/${room.code}` : `${base}/r/${room.id}`;
 }
 
 export function ShareRoom({ room, participants, selfId }: Props) {
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
 
   const copy = async (kind: "link" | "code") => {
-    const text = kind === "link" ? roomShareLink(room.id) : room.code;
+    const text = kind === "link" ? roomShareLink(room) : room.code;
     try {
       await navigator.clipboard.writeText(text);
     } catch {

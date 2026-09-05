@@ -3,24 +3,34 @@ import { useChatRoom } from "./hooks/useChatRoom";
 import { LandingScreen } from "./components/landing/LandingScreen";
 import { ChatRoom } from "./components/chat/ChatRoom";
 
-/** Pull an optional room id from the /r/:id deep-link. */
-function deepLinkRoomId(): string | null {
-  const m = window.location.pathname.match(/^\/r\/([A-Za-z0-9]+)/);
-  return m ? m[1] : null;
+/**
+ * Pull a room target from the URL:
+ *  - /r/:id  -> a full room id (shared link)
+ *  - /<code> -> a numeric join code, e.g. /99999999 for the special room
+ */
+function deepLinkTarget(): { code: string } | { roomId: string } | null {
+  const r = window.location.pathname.match(/^\/r\/([A-Za-z0-9]+)/);
+  if (r) return { roomId: r[1] };
+  const code = window.location.pathname.match(/^\/(\d{6,})$/);
+  if (code) return { code: code[1] };
+  return null;
 }
 
 export function App() {
   const [state, actions] = useChatRoom();
   const autoJoined = useRef(false);
 
-  // Auto-join room when arriving via a shared link.
+  // Auto-join room when arriving via a shared link or the special code URL.
   useEffect(() => {
     if (autoJoined.current) return;
-    const roomId = deepLinkRoomId();
-    if (roomId) {
+    const target = deepLinkTarget();
+    if (target) {
       autoJoined.current = true;
       // Give the socket a moment to handshake before joining.
-      const t = window.setTimeout(() => actions.joinRoom(roomId), 120);
+      const t = window.setTimeout(
+        () => actions.joinRoom("roomId" in target ? target.roomId : target.code),
+        120,
+      );
       return () => window.clearTimeout(t);
     }
     autoJoined.current = true;

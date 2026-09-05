@@ -32,7 +32,7 @@ function HistoryCard({
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(roomShareLink(entry.id));
+      await navigator.clipboard.writeText(roomShareLink(entry));
     } catch {
       /* ignore */
     }
@@ -85,9 +85,11 @@ function HistoryCard({
               {entry.lastParticipants === 1 ? "person" : "people"}
             </span>
             <span className="font-mono tabular-nums">
-              {live
-                ? `expires in ${formatCountdown(entry.expiresAt, now)}`
-                : "room vanished"}
+              {entry.persistent
+                ? "always open"
+                : live
+                  ? `expires in ${formatCountdown(entry.expiresAt, now)}`
+                  : "room vanished"}
             </span>
             <span>· {timeAgo(entry.lastVisitedAt, now)}</span>          </div>
         </div>
@@ -125,7 +127,7 @@ function HistoryCard({
               : "border-base-border text-ink-faint active:bg-base-border"
         }`}
       >
-        {live ? "Continue" : "Try reopening"}
+        {entry.persistent ? "Open your space" : live ? "Continue" : "Try reopening"}
         <IconArrowRight width={15} height={15} />
       </button>
     </div>

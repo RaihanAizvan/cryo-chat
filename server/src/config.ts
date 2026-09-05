@@ -9,6 +9,8 @@ export interface Config {
   corsOrigin: string[];
   /** In-memory message retention window before pruning. */
   messageTtlMs: number;
+  /** Rolling cap of messages retained per room (newest kept). */
+  messageCap: number;
   /** How long a room lives after creation before expiring, in ms. */
   roomTtlMs: number;
   /** Room stays alive while it has participants, capped by grace period. */
@@ -45,6 +47,7 @@ export const config: Config = {
   port: Number(process.env.PORT ?? 4000),
   corsOrigin: corsOriginList(process.env.CORS_ORIGIN),
   messageTtlMs: Number(process.env.MESSAGE_TTL_MS ?? 1000 * 60 * 60 * 24),
+  messageCap: Number(process.env.MESSAGE_CAP ?? 200),
   roomTtlMs: Number(process.env.ROOM_TTL_MS ?? 1000 * 60 * 60 * 2),
   roomGraceMs: Number(process.env.ROOM_GRACE_MS ?? 1000 * 60 * 30),
   maxRoomSize: Number(process.env.MAX_ROOM_SIZE ?? 50),

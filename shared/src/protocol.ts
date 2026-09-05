@@ -21,6 +21,8 @@ export interface ClientToServerEventMap {
   "room:join": { code?: string; roomId?: string };
   /** Leave a room (may be silent if not present). */
   "room:leave": { roomId: string };
+  /** Close a room: everyone is kicked and it is destroyed. */
+  "room:close": { roomId: string };
   /** Send a chat message. */
   "message:send": { roomId: string; text: string };
 }
@@ -49,6 +51,8 @@ export interface ServerToClientEventMap {
   "message:history": { messages: PublicMessage[] };
   /** Room expired while the client was inside it. */
   "room:expired": { roomId: string };
+  /** Room was closed (manually) while the client was inside it. */
+  "room:closed": { roomId: string };
 }
 
 /** Error events are delivered via socket.io's socket.emit("error") convention. */
@@ -138,4 +142,6 @@ export interface PublicRoom {
   participants: Participant[];
   /** True if the requesting client is the room host. */
   isHost: boolean;
+  /** True for the special preserved room: never auto-expires, closed manually. */
+  persistent: boolean;
 }

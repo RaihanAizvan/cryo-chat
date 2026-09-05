@@ -35,6 +35,8 @@ export interface Room {
   hostParticipantId: string;
   createdAt: number;
   expiresAt: number;
+  /** True for the special room: never auto-expires, closed only manually. */
+  persistent: boolean;
   /** Map of participant nonce -> participant. */
   participants: Map<string, Participant>;
   /** Map of socket.id -> participant nonce. */
@@ -53,12 +55,14 @@ export interface CreateRoomOptions {
 export function createRoom(options: CreateRoomOptions = {}): Room {
   const now = Date.now();
   const id = randomRoomId();
+  const persistent = Boolean(options.code && options.code === config.reservedRoomCode);
   const room: Room = {
     id,
     code: options.code ?? randomRoomCode(),
     hostParticipantId: "",
     createdAt: now,
-    expiresAt: now + config.roomTtlMs,
+    expiresAt: persistent ? Number.POSITIVE_INFINITY : now + config.roomTtlMs,
+    persistent,
     participants: new Map(),
     sockets: new Map(),
     messages: [],
@@ -240,9 +244,9 @@ function storeMessage(room: Room, message: InternalMessage): void {
     firstValid = i + 1;
   }
   if (firstValid > 0) room.messages.splice(0, firstValid);
-  // Hard cap on retained messages.
-  if (room.messages.length > 500) {
-    room.messages.splice(0, room.messages.length - 500);
+  // Hard cap on retained messages (rolling window: newest kept).
+  if (room.messages.length > config.messageCap) {
+    room.messages.splice(0, room.messages.length - config.messageCap);
   }
 }
 
@@ -267,8 +271,11 @@ export function toPublicRoom(room: Room, socketId: string, hostParticipantId: st
     id: room.id,
     code: room.code,
     createdAt: room.createdAt,
-expiresAt: room.expiresAt,
-      isHost: pid === hostParticipantId,
+    // Persistent rooms never auto-expire; serialize a far-future number since
+    // JSON cannot carry Infinity (it would arrive as null on the client).
+    expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+    isHost: pid === hostParticipantId,
+    persistent: room.persistent,
     participants: [...room.participants.values()].map((p) => ({
       id: p.id,
       name: p.name,

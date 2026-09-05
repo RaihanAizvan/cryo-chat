@@ -32,6 +32,8 @@ export interface HistoryEntry {
   /** Last known number of participants. */
   lastParticipants: number;
   isHost: boolean;
+  /** True for the preserved special room: never auto-expires. */
+  persistent: boolean;
 }
 
 type Listener = () => void;
@@ -63,9 +65,11 @@ class RoomHistoryStore {
       color: room.participants.find((p) => p.id)?.color ?? 0,
       createdAt: idx >= 0 ? this.entries[idx].createdAt : room.createdAt,
       lastVisitedAt: at,
-      expiresAt: room.expiresAt,
+      // Persistent rooms never expire; a far-future sentinel keeps them "live".
+      expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
       lastParticipants: room.participants.length,
       isHost: meta.isHost,
+      persistent: room.persistent,
     };
     if (idx >= 0) this.entries.splice(idx, 1);
     this.entries.unshift(entry);

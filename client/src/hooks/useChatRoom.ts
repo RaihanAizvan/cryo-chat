@@ -22,6 +22,7 @@ export interface RoomActions {
   createRoom: () => void;
   joinRoom: (codeOrId: string) => void;
   leaveRoom: () => void;
+  closeRoom: () => void;
   sendMessage: (text: string) => void;
   clearNotice: () => void;
   clearJoinError: () => void;
@@ -109,6 +110,10 @@ export function useChatRoom(): [RoomState, RoomActions] {
       exitRoom();
       flashNotice("This room has expired.");
     };
+    const onClosed = () => {
+      exitRoom();
+      flashNotice("This room was closed.");
+    };
     const onError = (err: ErrorPayload) => {
       switch (err.code) {
         case "room_not_found":
@@ -136,6 +141,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
     socket.on("presence:left", onPresenceLeft);
     socket.on("presence:renamed", onPresenceRenamed);
     socket.on("room:expired", onExpired);
+    socket.on("room:closed", onClosed);
     socket.on("error", onError);
 
     return () => {
@@ -146,6 +152,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       socket.off("presence:left", onPresenceLeft);
       socket.off("presence:renamed", onPresenceRenamed);
       socket.off("room:expired", onExpired);
+      socket.off("room:closed", onClosed);
       socket.off("error", onError);
     };
   }, [enterRoom, exitRoom, touchHistory]);
@@ -174,6 +181,14 @@ export function useChatRoom(): [RoomState, RoomActions] {
     exitRoom();
   }, [exitRoom]);
 
+  const closeRoom = useCallback(() => {
+    const id = roomRef.current?.id;
+    if (id) socket.emit("room:close", { roomId: id });
+    // The server confirms with room:closed (kicks everyone). Optimistically
+    // exit so the rest of the world sees the immediate effect.
+    exitRoom();
+  }, [exitRoom]);
+
   const sendMessage = useCallback((text: string) => {
     const id = roomRef.current?.id;
     if (!id || !text.trim()) return;
@@ -182,6 +197,6 @@ export function useChatRoom(): [RoomState, RoomActions] {
 
   return [
     { room, messages, participants, notice, joinError },
-    { createRoom, joinRoom, leaveRoom, sendMessage, clearNotice, clearJoinError },
+    { createRoom, joinRoom, leaveRoom, closeRoom, sendMessage, clearNotice, clearJoinError },
   ];
 }

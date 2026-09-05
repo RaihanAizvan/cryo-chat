@@ -35,9 +35,12 @@ export function ChatRoom({ state, actions }: Props) {
       <ChatHeader
         room={room}
         participantCount={participants.length}
+        participants={participants}
+        selfId={selfId}
         notice={notice}
         onBack={actions.leaveRoom}
         onLeave={actions.leaveRoom}
+        onClose={actions.closeRoom}
       />
 
       <div className="flex-1 overflow-hidden">

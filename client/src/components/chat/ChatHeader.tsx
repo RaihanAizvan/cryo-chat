@@ -1,23 +1,39 @@
 import { useState } from "react";
-import type { PublicRoom } from "@cryo/shared";
-import { IconBack, IconDots, IconCopy, IconCheck, IconLink } from "../ui/Icon";
+import type { PublicRoom, Participant } from "@cryo/shared";
+import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX } from "../ui/Icon";
+import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { formatTime } from "../../lib/format";
 import { roomShareLink } from "./ShareRoom";
 
 interface Props {
   room: PublicRoom;
   participantCount: number;
+  participants: Participant[];
+  selfId: string | null;
   notice: string | null;
   onBack: () => void;
   onLeave: () => void;
+  onClose: () => void;
 }
 
-export function ChatHeader({ room, participantCount, notice, onBack, onLeave }: Props) {
+export function ChatHeader({
+  room,
+  participantCount,
+  participants,
+  selfId,
+  notice,
+  onBack,
+  onLeave,
+  onClose,
+}: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const showRoster = room.persistent;
 
   const copy = async (kind: "link" | "code") => {
-    const text = kind === "link" ? roomShareLink(room.id) : room.code;
+    const text = kind === "link" ? roomShareLink(room) : room.code;
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -51,13 +67,40 @@ export function ChatHeader({ room, participantCount, notice, onBack, onLeave }: 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-semibold text-ink">
-              {participantCount === 2 ? "Private chat" : `Room · ${participantCount}`}
+              {room.persistent
+                ? "Your space"
+                : participantCount === 2
+                  ? "Private chat"
+                  : `Room · ${participantCount}`}
             </span>
             <span className="rounded-md bg-base-border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-ink-muted">
               {room.code}
             </span>
           </div>
           <ConnectionStatus />
+
+          {/* Who's in the room (special room only) — names + join times. */}
+          {showRoster && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {participants.map((p) => (
+                <span
+                  key={p.id}
+                  className={`inline-flex items-center gap-1.5 text-[11px] ${
+                    p.id === selfId ? "text-ink" : "text-ink-muted"
+                  }`}
+                  title={`Joined at ${formatTime(p.joinedAt)}`}
+                >
+                  <Avatar name={p.name} color={p.color} size="xs" />
+                  <span className="max-w-[9rem] truncate font-medium">
+                    {p.id === selfId ? "You" : p.name}
+                  </span>
+                  <span className="font-mono tabular-nums text-ink-faint">
+                    {formatTime(p.joinedAt)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <button
@@ -122,6 +165,44 @@ export function ChatHeader({ room, participantCount, notice, onBack, onLeave }: 
               )}
             </button>
             <div className="my-1 h-px bg-base-border" />
+            {room.persistent && (
+              <>
+                {confirmingClose ? (
+                  <div className="px-3 py-2">
+                    <p className="mb-2 text-xs text-ink-muted">
+                      Close this space for everyone?
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => {
+                          onClose();
+                          setMenuOpen(false);
+                          setConfirmingClose(false);
+                        }}
+                        className="flex-1 rounded-lg bg-rose-500/15 px-2 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/25"
+                      >
+                        Close
+                      </button>
+                      <button
+                        onClick={() => setConfirmingClose(false)}
+                        className="flex-1 rounded-lg bg-base-border px-2 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border2"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmingClose(true)}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-300 transition-colors hover:bg-base-border"
+                  >
+                    <IconX width={15} height={15} className="text-rose-300" />
+                    Close space
+                  </button>
+                )}
+                <div className="my-1 h-px bg-base-border" />
+              </>
+            )}
             <button
               onClick={() => {
                 onLeave();
