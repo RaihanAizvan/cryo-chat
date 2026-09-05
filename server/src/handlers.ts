@@ -10,7 +10,8 @@
 import type { Server, Socket } from "socket.io";
 import type { ErrorPayload } from "@cryo/shared";
 import { config } from "./config.js";
-import { getSession, updateName } from "./sessions.js";import * as rooms from "./rooms.js";
+import { getSession, updateName } from "./sessions.js";
+import * as rooms from "./rooms.js";
 import { normalizeMessage, RateLimiter } from "./validation.js";
 import { normalizeCode } from "./util.js";
 
@@ -89,6 +90,16 @@ export function attachHandlers(io: Server, socket: Socket): void {
     }
     leaveRoom(io, socket, membership.room);
     socket.emit("room:left", { roomId: membership.room.id });
+  });
+
+  socket.on("room:close", (raw) => {
+    const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
+    const membership = ROOM_MEMBERSHIP.get(socket);
+    if (!membership || (roomId && membership.room.id !== roomId)) {
+      sendError(socket, { code: "not_in_room", message: "You're not in that room." });
+      return;
+    }
+    closeRoom(io, membership.room);
   });
 
   socket.on("message:send", (raw) => {
@@ -171,11 +182,20 @@ function leaveRoom(io: Server, socket: Socket, room: rooms.Room): void {
     io.to(room.id).emit("message:new", { message: system });
     io.to(room.id).emit("presence:left", { participantId: participant.id });
   }
-  // Room becomes empty -> schedule expiry (grace period from last activity).
-  if (room.participants.size === 0) {
-    const graceEnd = Date.now() + config.roomGraceMs;
-    if (graceEnd < room.expiresAt) room.expiresAt = graceEnd;
+  // A room's lifetime is fixed at creation (roomTtlMs). Leaving does NOT pull
+  // the expiry forward — otherwise an empty room's countdown would jump down,
+  // and the room would die while people are just stepping out. The special
+  // room never expires, so nothing happens here for it.
+}
+
+/** Close a room: kick everyone, announce it, and destroy it. */
+function closeRoom(io: Server, room: rooms.Room): void {
+  io.to(room.id).emit("room:closed", { roomId: room.id });
+  for (const sid of room.sockets.keys()) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) ROOM_MEMBERSHIP.delete(s);
   }
+  rooms.deleteRoom(room.id);
 }
 
 /** Periodically prune expired rooms and rate-limiter buckets. */
