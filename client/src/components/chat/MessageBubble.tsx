@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { PublicMessage } from "@cryo/shared";
 import { Avatar } from "../ui/Avatar";
 import { formatTime } from "../../lib/format";
@@ -10,6 +11,29 @@ interface Props {
   firstInGroup: boolean;
   /** True when a recipient is present in the room, meaning the message was seen. */
   seen?: boolean;
+}
+
+const URL_RE = /(https?:\/\/[^\s<]+)/g;
+
+/** Render text with http(s) URLs turned into safe, new-tab links. */
+function renderText(text: string) {
+  const parts = text.split(URL_RE);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) {
+      return (
+        <a
+          key={i}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline decoration-inherit underline-offset-2 hover:opacity-80"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <Fragment key={i}>{part}</Fragment>;
+  });
 }
 
 export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
@@ -72,7 +96,7 @@ export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
                   : "rounded-bubble rounded-bl-md border border-base-border bg-base-raised text-ink"
               }`}
             >
-              {message.text}
+              {renderText(message.text)}
               <span
                 className={`ml-1.5 flex items-center justify-end gap-0.5 whitespace-nowrap pt-1 text-right text-[9px] leading-none ${
                   mine ? "text-white/60" : "text-ink-faint"
