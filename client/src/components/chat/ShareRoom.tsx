@@ -15,7 +15,7 @@ export function roomShareLink(room: {
   persistent: boolean;
 }): string {
   const base = window.location.origin;
-  // The special room is best shared by its stable code URL (/99999999), which
+  // The special room is best shared by its stable code URL (/9999), which
   // keeps working even after the room has been closed and recreated.
   return room.persistent ? `${base}/${room.code}` : `${base}/r/${room.id}`;
 }

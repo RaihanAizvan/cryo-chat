@@ -6,12 +6,12 @@ import { ChatRoom } from "./components/chat/ChatRoom";
 /**
  * Pull a room target from the URL:
  *  - /r/:id  -> a full room id (shared link)
- *  - /<code> -> a numeric join code, e.g. /99999999 for the special room
+ *  - /<code> -> a 4-digit numeric join code, e.g. /9999 for the special room
  */
 function deepLinkTarget(): { code: string } | { roomId: string } | null {
   const r = window.location.pathname.match(/^\/r\/([A-Za-z0-9]+)/);
   if (r) return { roomId: r[1] };
-  const code = window.location.pathname.match(/^\/(\d{6,})$/);
+  const code = window.location.pathname.match(/^\/(\d{4})$/);
   if (code) return { code: code[1] };
   return null;
 }

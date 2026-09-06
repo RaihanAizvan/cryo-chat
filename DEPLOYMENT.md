@@ -22,7 +22,7 @@ Abasthan runs a persistent Node web service, so the whole app fits in one servic
 - **Start command:** `npm start`
 - **Environment variables:**
   - `PORT` — Abasthan injects this automatically; the server listens on it.
-  - `RESERVED_ROOM_CODE` — optional, default `99999999`.
+  - `RESERVED_ROOM_CODE` — optional, default `9999`.
   - `MAX_ROOM_SIZE` — optional, default `50`.
   - `CORS_ORIGIN` — optional; same-origin requests are allowed, so you generally
     don't need this. Set it only if a separate site connects to the socket.
