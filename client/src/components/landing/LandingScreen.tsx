@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useSession, useConnectionStatus, connectAndInit } from "../../lib/store";
 import { getStoredDisplayName } from "../../lib/prefs";
 import { Avatar } from "../ui/Avatar";
-import { IconArrowRight, IconPlus, IconLink } from "../ui/Icon";
+import { IconArrowRight, IconPlus, IconLink, IconSparkle } from "../ui/Icon";
 import { JoinRoom } from "./JoinRoom";
 import { NameEditor } from "./NameEditor";
 import { ConnectionStatus } from "../chat/ConnectionStatus";
@@ -54,7 +54,14 @@ export function LandingScreen({ state, actions }: Props) {
       {/* Hero */}
       <div className="flex flex-col items-center px-6 pt-6 pb-8 text-center">
         <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-base-border bg-base-raised text-xl text-ink">
-          <span className="font-semibold tracking-tight">cr</span>
+          <span className="relative font-semibold tracking-tight">
+            cr
+            <IconSparkle
+              width={12}
+              height={12}
+              className="cryo-float absolute -right-3 -top-2 text-accent"
+            />
+          </span>
         </div>
         <h1 className="text-3xl font-semibold tracking-tight text-ink">
           Chat with no trace.

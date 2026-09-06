@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
-import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX } from "../ui/Icon";
+import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX, IconSparkle } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { formatTime } from "../../lib/format";
@@ -66,14 +66,25 @@ export function ChatHeader({
         {/* Room title */}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-2">
-            <span className="truncate text-[15px] font-semibold text-ink">
-              {room.persistent
-                ? "Your space"
-                : participantCount === 2
+            {room.persistent ? (
+              <span className="cryo-float cryo-glow inline-flex max-w-[70%] items-center gap-1.5 truncate rounded-full bg-gradient-to-r from-accent/25 via-fuchsia-400/20 to-amber-300/25 px-2.5 py-1 text-[13px] font-bold tracking-tight text-ink">
+                <IconSparkle width={14} height={14} className="shrink-0 text-accent" />
+                <span className="truncate">Your space</span>
+              </span>
+            ) : (
+              <span className="truncate text-[15px] font-semibold text-ink">
+                {participantCount === 2
                   ? "Private chat"
                   : `Room · ${participantCount}`}
-            </span>
-            <span className="rounded-md bg-base-border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-ink-muted">
+              </span>
+            )}
+            <span
+              className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider ${
+                room.persistent
+                  ? "bg-accent/15 text-accent"
+                  : "bg-base-border text-ink-muted"
+              }`}
+            >
               {room.code}
             </span>
           </div>

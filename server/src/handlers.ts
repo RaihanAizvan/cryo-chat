@@ -262,6 +262,10 @@ function joinInternal(
 }
 
 function emitJoined(io: Server, socket: Socket, room: rooms.Room): void {
+  // Welcome note the very first time the special space comes to life.
+  if (room.persistent && rooms.getMessages(room).length === 0) {
+    rooms.addSystemMessage(room, "✨ This is your space — it never closes. Pull up a chair.");
+  }
   socket.emit("room:joined", { room: rooms.toPublicRoom(room, socket.id, room.hostParticipantId) });
   socket.emit("message:history", { messages: rooms.getMessages(room) });
   // Notify others + a persistent system pill in their history/feed.
