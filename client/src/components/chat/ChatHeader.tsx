@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
 import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
@@ -43,25 +43,29 @@ export function ChatHeader({
   const [confirmingClose, setConfirmingClose] = useState(false);
 
   // WhatsApp-style: remember the other person in the special space so the
-  // header keeps showing their name and their last-seen even after they
-  // step out. lastSeen is refreshed whenever we observe them present.
-  const peerRef = useRef<{ name: string; color: number; lastSeen: number } | null>(null);
+  // header keeps showing their name and last-seen even after they step out.
+  // Peer must be state (not a ref) so the header re-renders the moment the
+  // other person joins — a ref mutation alone would never repaint the header.
+  const [peer, setPeer] = useState<{
+    name: string;
+    color: number;
+    lastSeen: number;
+  } | null>(null);
   // Entering a different room must not leak the previous room's peer.
   useEffect(() => {
-    peerRef.current = null;
+    setPeer(null);
   }, [room.id]);
   useEffect(() => {
     if (!room.persistent) return;
     const other = participants.find((p) => p.id !== selfId);
     if (other) {
-      peerRef.current = {
-        name: other.name,
-        color: other.color,
-        lastSeen: Date.now(),
-      };
+      setPeer((prev) =>
+        prev && prev.name === other.name && prev.color === other.color
+          ? { ...prev, lastSeen: Date.now() }
+          : { name: other.name, color: other.color, lastSeen: Date.now() },
+      );
     }
   }, [participants, selfId, room.persistent]);
-  const peer = peerRef.current;
   const otherPresent = participants.some((p) => p.id !== selfId);
 
   const copy = async (kind: "link" | "code") => {
