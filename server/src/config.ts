@@ -54,7 +54,7 @@ export const config: Config = {
   messageRateWindowMs: Number(process.env.MESSAGE_RATE_WINDOW_MS ?? 10_000),
   messageRateLimit: Number(process.env.MESSAGE_RATE_LIMIT ?? 10),
   maxSocketsPerIp: Number(process.env.MAX_SOCKETS_PER_IP ?? 20),
-  reservedRoomCode: process.env.RESERVED_ROOM_CODE ?? "99999999",
+  reservedRoomCode: process.env.RESERVED_ROOM_CODE ?? "9999",
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 30_000),
   clientDist: process.env.CLIENT_DIST ?? DEFAULT_CLIENT_DIST,
 };

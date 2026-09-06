@@ -5,7 +5,7 @@
 import { randomBytes, randomInt } from "node:crypto";
 import { ROOM_CODE_SIZE, ROOM_ID_SIZE, MAX_NAME_LENGTH, hash } from "@cryo/shared";
 
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CODE_ALPHABET = "0123456789";
 const ID_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -19,12 +19,12 @@ export function randomRoomId(size = ROOM_ID_SIZE): string {
   return out;
 }
 
-/** Generate a user-friendly short room code (easier to type). */
+/** Generate a user-friendly 4-digit numeric room code. */
 export function randomRoomCode(size = ROOM_CODE_SIZE): string {
-  const bytes = randomBytes(size);
-  let out = "";
-  for (let i = 0; i < size; i++) {
-    out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  // First digit is non-zero so codes display cleanly (1000–9999).
+  let out = randomInt(1, 10).toString();
+  for (let i = 1; i < size; i++) {
+    out += randomInt(0, 10).toString();
   }
   return out;
 }
