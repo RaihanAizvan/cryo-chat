@@ -5,6 +5,18 @@ import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { roomShareLink } from "./ShareRoom";
 
+function formatLastSeen(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return `today at ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `yesterday at ${time}`;
+  const date = d.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `on ${date} at ${time}`;
+}
+
 interface Props {
   room: PublicRoom;
   participantCount: number;
@@ -31,8 +43,9 @@ export function ChatHeader({
   const [confirmingClose, setConfirmingClose] = useState(false);
 
   // WhatsApp-style: remember the other person in the special space so the
-  // header keeps showing their name even after they step out.
-  const peerRef = useRef<{ name: string; color: number } | null>(null);
+  // header keeps showing their name and their last-seen even after they
+  // step out. lastSeen is refreshed whenever we observe them present.
+  const peerRef = useRef<{ name: string; color: number; lastSeen: number } | null>(null);
   // Entering a different room must not leak the previous room's peer.
   useEffect(() => {
     peerRef.current = null;
@@ -41,7 +54,11 @@ export function ChatHeader({
     if (!room.persistent) return;
     const other = participants.find((p) => p.id !== selfId);
     if (other) {
-      peerRef.current = { name: other.name, color: other.color };
+      peerRef.current = {
+        name: other.name,
+        color: other.color,
+        lastSeen: Date.now(),
+      };
     }
   }, [participants, selfId, room.persistent]);
   const peer = peerRef.current;
@@ -104,7 +121,9 @@ export function ChatHeader({
                       </span>
                     </>
                   ) : (
-                    <span className="text-ink-faint">Not in the space</span>
+                    <span className="text-ink-faint">
+                      Last seen {formatLastSeen(peer.lastSeen)}
+                    </span>
                   )}
                 </div>
               </div>
