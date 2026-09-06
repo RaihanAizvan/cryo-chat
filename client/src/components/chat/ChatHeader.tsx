@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
-import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX, IconSparkle } from "../ui/Icon";
+import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
-import { formatTime } from "../../lib/format";
 import { roomShareLink } from "./ShareRoom";
 
 interface Props {
@@ -30,7 +29,23 @@ export function ChatHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
   const [confirmingClose, setConfirmingClose] = useState(false);
-  const showRoster = room.persistent;
+
+  // WhatsApp-style: remember the other person in the special space so the
+  // header keeps showing their name even after they step out.
+  const peerRef = useRef<{ name: string; color: number } | null>(null);
+  // Entering a different room must not leak the previous room's peer.
+  useEffect(() => {
+    peerRef.current = null;
+  }, [room.id]);
+  useEffect(() => {
+    if (!room.persistent) return;
+    const other = participants.find((p) => p.id !== selfId);
+    if (other) {
+      peerRef.current = { name: other.name, color: other.color };
+    }
+  }, [participants, selfId, room.persistent]);
+  const peer = peerRef.current;
+  const otherPresent = participants.some((p) => p.id !== selfId);
 
   const copy = async (kind: "link" | "code") => {
     const text = kind === "link" ? roomShareLink(room) : room.code;
@@ -65,52 +80,49 @@ export function ChatHeader({
 
         {/* Room title */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2">
-            {room.persistent ? (
-              <span className="cryo-float cryo-glow inline-flex max-w-[70%] items-center gap-1.5 truncate rounded-full bg-gradient-to-r from-accent/25 via-fuchsia-400/20 to-amber-300/25 px-2.5 py-1 text-[13px] font-bold tracking-tight text-ink">
-                <IconSparkle width={14} height={14} className="shrink-0 text-accent" />
-                <span className="truncate">Your space</span>
-              </span>
-            ) : (
-              <span className="truncate text-[15px] font-semibold text-ink">
-                {participantCount === 2
-                  ? "Private chat"
-                  : `Room · ${participantCount}`}
-              </span>
-            )}
-            <span
-              className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider ${
-                room.persistent
-                  ? "bg-accent/15 text-accent"
-                  : "bg-base-border text-ink-muted"
-              }`}
-            >
-              {room.code}
-            </span>
-          </div>
-          <ConnectionStatus />
-
-          {/* Who's in the room (special room only) — names + join times. */}
-          {showRoster && (
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {participants.map((p) => (
-                <span
-                  key={p.id}
-                  className={`inline-flex items-center gap-1.5 text-[11px] ${
-                    p.id === selfId ? "text-ink" : "text-ink-muted"
-                  }`}
-                  title={`Joined at ${formatTime(p.joinedAt)}`}
-                >
-                  <Avatar name={p.name} color={p.color} size="xs" />
-                  <span className="max-w-[9rem] truncate font-medium">
-                    {p.id === selfId ? "You" : p.name}
-                  </span>
-                  <span className="font-mono tabular-nums text-ink-faint">
-                    {formatTime(p.joinedAt)}
-                  </span>
-                </span>
-              ))}
+          {room.persistent ? (
+            /* The special space renders like a 1-on-1 chat: peer avatar, name,
+               and a last-seen style presence line. No code, no member list. */
+            <div className="flex min-w-0 items-center gap-2.5">
+              <Avatar
+                name={peer?.name ?? "Your space"}
+                color={peer?.color ?? 0}
+                size="sm"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[15px] font-semibold text-ink">
+                  {peer ? peer.name : "Your space"}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  {!peer ? (
+                    <span className="text-ink-faint">Waiting for someone…</span>
+                  ) : otherPresent ? (
+                    <>
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      <span className="font-medium text-emerald-300">
+                        Active now
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-ink-faint">Not in the space</span>
+                  )}
+                </div>
+              </div>
             </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="truncate text-[15px] font-semibold text-ink">
+                  {participantCount === 2
+                    ? "Private chat"
+                    : `Room · ${participantCount}`}
+                </span>
+                <span className="rounded-md bg-base-border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-ink-muted">
+                  {room.code}
+                </span>
+              </div>
+              <ConnectionStatus />
+            </>
           )}
         </div>
 
