@@ -25,6 +25,8 @@ export interface ClientToServerEventMap {
   "room:close": { roomId: string };
   /** Send a chat message. clientId lets the sender match their optimistic copy. */
   "message:send": { roomId: string; text: string; clientId?: string };
+  /** Ask the server for current status of a list of rooms (home screen). */
+  "room:status": { refs: RoomRef[] };
 }
 
 /** Server -> Client events. */
@@ -53,6 +55,8 @@ export interface ServerToClientEventMap {
   "room:expired": { roomId: string };
   /** Room was closed (manually) while the client was inside it. */
   "room:closed": { roomId: string };
+  /** Current status for the requested rooms (home screen). */
+  "room:status:result": { statuses: RoomStatus[] };
 }
 
 /** Error events are delivered via socket.io's socket.emit("error") convention. */
@@ -141,6 +145,25 @@ export interface PublicMessage {
 }
 
 export type MessageKind = "user" | "system";
+
+/** A reference to a room: share-code, room id, or both. */
+export interface RoomRef {
+  code?: string;
+  roomId?: string;
+}
+
+/** Status snapshot of one room, used to keep the home screen accurate. */
+export interface RoomStatus {
+  code?: string;
+  roomId?: string;
+  /** Whether the room currently exists on the server. */
+  exists: boolean;
+  /** Current number of participants inside. */
+  participantCount: number;
+  /** Expiry the client should use (far-future for the persistent room). */
+  expiresAt: number;
+  persistent: boolean;
+}
 
 export interface PublicRoom {
   id: string;

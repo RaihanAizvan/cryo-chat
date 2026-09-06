@@ -8,7 +8,7 @@
  */
 
 import type { Server, Socket } from "socket.io";
-import type { ErrorPayload } from "@cryo/shared";
+import type { ErrorPayload, RoomRef } from "@cryo/shared";
 import { config } from "./config.js";
 import { getSession, updateName } from "./sessions.js";
 import * as rooms from "./rooms.js";
@@ -100,6 +100,37 @@ export function attachHandlers(io: Server, socket: Socket): void {
       return;
     }
     closeRoom(io, membership.room);
+  });
+
+  // Home screen: current status of a handful of saved rooms (live participant
+  // counts, open vs closed). Used by the recent-rooms list to stay truthful.
+  socket.on("room:status", (raw) => {
+    const refs: RoomRef[] = Array.isArray(raw?.refs) ? raw.refs : [];
+    const statuses = refs
+      .slice(0, 30)
+      .map((ref) => {
+        const code = typeof ref?.code === "string" ? normalizeCode(ref.code) : undefined;
+        const roomId = typeof ref?.roomId === "string" ? ref.roomId : undefined;
+        const room = roomId
+          ? rooms.getRoom(roomId)
+          : code
+            ? code === config.reservedRoomCode
+              ? rooms.getOrCreateReservedRoom()
+              : rooms.getRoomByCode(code)
+            : undefined;
+        if (!room) {
+          return { code, roomId, exists: false, participantCount: 0, expiresAt: 0, persistent: false };
+        }
+        return {
+          code: room.code,
+          roomId: room.id,
+          exists: true,
+          participantCount: room.participants.size,
+          expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+          persistent: room.persistent,
+        };
+      });
+    socket.emit("room:status:result", { statuses });
   });
 
   socket.on("message:send", (raw) => {
