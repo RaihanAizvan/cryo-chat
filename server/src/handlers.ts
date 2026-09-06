@@ -109,17 +109,29 @@ export function attachHandlers(io: Server, socket: Socket): void {
       return;
     }
     const text = normalizeMessage(raw?.text);
+    const clientId =
+      typeof raw?.clientId === "string" && raw.clientId.length <= 64
+        ? raw.clientId
+        : undefined;
     if (!text) {
-      sendError(socket, { code: "message_invalid", message: "Message rejected." });
+      sendError(socket, {
+        code: "message_invalid",
+        message: "Message rejected.",
+        clientId,
+      });
       return;
     }
     if (!messageLimiter.allow(socket.id)) {
-      sendError(socket, { code: "rate_limited", message: "Slow down a little." });
+      sendError(socket, {
+        code: "rate_limited",
+        message: "Slow down a little.",
+        clientId,
+      });
       return;
     }
     const participant = rooms.participantForSocket(membership.room, socket.id);
     if (!participant) return;
-    const message = rooms.addMessage(membership.room, participant, text);
+    const message = rooms.addMessage(membership.room, participant, text, clientId);
     io.to(membership.room.id).emit("message:new", { message });
   });
 

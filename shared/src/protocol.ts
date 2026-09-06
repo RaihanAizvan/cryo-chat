@@ -23,8 +23,8 @@ export interface ClientToServerEventMap {
   "room:leave": { roomId: string };
   /** Close a room: everyone is kicked and it is destroyed. */
   "room:close": { roomId: string };
-  /** Send a chat message. */
-  "message:send": { roomId: string; text: string };
+  /** Send a chat message. clientId lets the sender match their optimistic copy. */
+  "message:send": { roomId: string; text: string; clientId?: string };
 }
 
 /** Server -> Client events. */
@@ -68,6 +68,8 @@ export type ErrorCode =
 export interface ErrorPayload {
   code: ErrorCode;
   message: string;
+  /** When set, this error is about the matching message send. */
+  clientId?: string;
 }
 
 /** Colors a participant may be assigned (index into a fixed palette). */
@@ -129,6 +131,13 @@ export interface PublicMessage {
    * backwards-compatible user messages (treated as "user" by clients).
    */
   kind?: MessageKind;
+  /** Echoed from the sender (message:send) so clients can match them. */
+  clientId?: string;
+  /**
+   * Client-only delivery status for optimistic sends ("pending"). Sent by the
+   * server without this field. Not part of the wire protocol for history.
+   */
+  status?: "pending" | "failed";
 }
 
 export type MessageKind = "user" | "system";

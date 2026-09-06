@@ -27,6 +27,7 @@ interface InternalMessage {
   sentAt: number;
   kind: MessageKind;
   _roomId: string;
+  clientId?: string;
 }
 
 export interface Room {
@@ -180,6 +181,7 @@ export function addMessage(
   room: Room,
   participant: Participant,
   text: string,
+  clientId?: string,
 ): PublicMessage {
   const now = Date.now();
   const message: InternalMessage = {
@@ -191,18 +193,10 @@ export function addMessage(
     sentAt: now,
     kind: "user",
     _roomId: room.id,
+    clientId,
   };
   storeMessage(room, message);
-  return {
-    id: message.id,
-    roomId: message._roomId,
-    participantId: message.participantId,
-    name: message.name,
-    color: message.color,
-    text: message.text,
-    sentAt: message.sentAt,
-    kind: message.kind,
-  };
+  return toPublicMessage(message);
 }
 
 /** Store a system message (join/left pill) in the room history. */
@@ -219,6 +213,10 @@ export function addSystemMessage(room: Room, text: string): PublicMessage {
     _roomId: room.id,
   };
   storeMessage(room, message);
+  return toPublicMessage(message);
+}
+
+function toPublicMessage(message: InternalMessage): PublicMessage {
   return {
     id: message.id,
     roomId: message._roomId,
@@ -228,6 +226,7 @@ export function addSystemMessage(room: Room, text: string): PublicMessage {
     text: message.text,
     sentAt: message.sentAt,
     kind: message.kind,
+    clientId: message.clientId,
   };
 }
 
@@ -252,16 +251,7 @@ function storeMessage(room: Room, message: InternalMessage): void {
 
 /** Get normalized public messages for a room (most-recent-first order kept). */
 export function getMessages(room: Room): PublicMessage[] {
-  return room.messages.map((m) => ({
-    id: m.id,
-    roomId: m._roomId,
-    participantId: m.participantId,
-    name: m.name,
-    color: m.color,
-    text: m.text,
-    sentAt: m.sentAt,
-    kind: m.kind,
-  }));
+  return room.messages.map(toPublicMessage);
 }
 
 /** Build the public (client-safe) representation of a room from a socket's view. */
