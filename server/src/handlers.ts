@@ -117,8 +117,20 @@ export function attachHandlers(io: Server, socket: Socket): void {
     }
   });
 
-  socket.on("room:create", () => {
-    const room = rooms.createRoom();
+  socket.on("room:create", (raw) => {
+    // Users can request a specific code (typed in the join box, or a room that
+    // was closed/expired and is being reopened). Validate it, ensure it's not
+    // already taken by a live room, then create.
+    const wanted =
+      typeof raw?.code === "string" ? normalizeCode(raw.code) : undefined;
+    if (wanted) {
+      const existing = rooms.getRoomByCode(wanted);
+      if (existing) {
+        sendError(socket, { code: "room_exists", message: "That code is taken." });
+        return;
+      }
+    }
+    const room = rooms.createRoom(wanted ? { code: wanted } : {});
     if (!joinInternal(io, socket, room)) return;
     socket.emit("room:created", { roomId: room.id, code: room.code });
     emitJoined(io, socket, room);
@@ -174,12 +186,15 @@ export function attachHandlers(io: Server, socket: Socket): void {
       .map((ref) => {
         const code = typeof ref?.code === "string" ? normalizeCode(ref.code) : undefined;
         const roomId = typeof ref?.roomId === "string" ? ref.roomId : undefined;
-        const room = roomId
-          ? rooms.getRoom(roomId)
-          : code
-            ? code === config.reservedRoomCode
-              ? rooms.getOrCreateReservedRoom()
-              : rooms.getRoomByCode(code)
+        // Resolve by code first: codes are unique among live rooms and survive
+        // room re-creation, while a saved roomId can go stale (e.g. 9999 after
+        // it is recreated). Falling back to the id covers deep-link refs.
+        const room = code
+          ? code === config.reservedRoomCode
+            ? rooms.getOrCreateReservedRoom()
+            : rooms.getRoomByCode(code)
+          : roomId
+            ? rooms.getRoom(roomId)
             : undefined;
         if (!room) {
           return { code, roomId, exists: false, participantCount: 0, expiresAt: 0, persistent: false };

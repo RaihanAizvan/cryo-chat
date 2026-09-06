@@ -15,8 +15,8 @@ export const MAX_NAME_LENGTH = 24;
 export interface ClientToServerEventMap {
   /** Establish/refresh the anonymous display name for the connection. */
   "session:name": { name: string };
-  /** Create a brand-new room. */
-  "room:create": {};
+  /** Create a brand-new room. Pass a code to claim a specific one. */
+  "room:create": { code?: string };
   /** Join an existing room by code. */
   "room:join": { code?: string; roomId?: string };
   /** Leave a room (may be silent if not present). */
@@ -62,6 +62,7 @@ export interface ServerToClientEventMap {
 /** Error events are delivered via socket.io's socket.emit("error") convention. */
 export type ErrorCode =
   | "room_not_found"
+  | "room_exists"
   | "room_full"
   | "room_expired"
   | "name_invalid"
