@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import type { PublicMessage } from "@cryo/shared";
 import { Avatar } from "../ui/Avatar";
 import { formatTime } from "../../lib/format";
-import { IconCheck, IconDoubleTick } from "../ui/Icon";
+import { IconCheck, IconClock, IconAlertTriangle, IconDoubleTick } from "../ui/Icon";
 import { isEmojiOnly } from "../../lib/emojiDetect";
 
 interface Props {
@@ -36,9 +36,60 @@ function renderText(text: string) {
   });
 }
 
+/** A tiny delivery-status icon (WhatsApp-style): clock → tick → double tick. */
+function StatusIcon({
+  status,
+  tone,
+}: {
+  status: "pending" | "sent" | "seen" | "failed";
+  tone: "on-accent" | "plain";
+}) {
+  const color =
+    status === "pending"
+      ? tone === "on-accent"
+        ? "text-white/60"
+        : "text-amber-300/80"
+      : status === "failed"
+        ? "text-rose-400"
+        : status === "seen"
+          ? "text-emerald-300"
+          : tone === "on-accent"
+            ? "text-white/60"
+            : "text-ink-faint";
+  if (status === "pending") {
+    return <IconClock width={11} height={11} strokeWidth={2.2} className={color} />;
+  }
+  if (status === "failed") {
+    return (
+      <IconAlertTriangle width={11} height={11} strokeWidth={2.2} className={color} />
+    );
+  }
+  if (status === "seen") {
+    return (
+      <IconDoubleTick
+        width={13}
+        height={13}
+        strokeWidth={2.2}
+        className={`-mr-0.5 ${color}`}
+      />
+    );
+  }
+  return <IconCheck width={11} height={11} strokeWidth={2.4} className={color} />;
+}
+
 export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
   const showName = !mine && firstInGroup;
   const emojiOnly = isEmojiOnly(message.text);
+  // Pending/failed are set by the sender's optimistic copy; otherwise the
+  // message is "sent" until a recipient is present ("seen").
+  const status: "pending" | "sent" | "seen" | "failed" =
+    message.status === "pending"
+      ? "pending"
+      : message.status === "failed"
+        ? "failed"
+        : mine && seen
+          ? "seen"
+          : "sent";
 
   return (
     <div
@@ -75,17 +126,7 @@ export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
                 }`}
               >
                 {formatTime(message.sentAt)}
-                {mine &&
-                  (seen ? (
-                    <IconDoubleTick
-                      width={13}
-                      height={13}
-                      strokeWidth={2.2}
-                      className="-mr-0.5 text-emerald-300"
-                    />
-                  ) : (
-                    <IconCheck width={11} height={11} strokeWidth={2.4} />
-                  ))}
+                {mine && <StatusIcon status={status} tone="plain" />}
               </span>
             </div>
           ) : (
@@ -103,17 +144,12 @@ export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
                 }`}
               >
                 {formatTime(message.sentAt)}
-                {mine &&
-                  (seen ? (
-                    <IconDoubleTick
-                      width={13}
-                      height={13}
-                      strokeWidth={2.2}
-                      className="-mr-0.5 text-emerald-300"
-                    />
-                  ) : (
-                    <IconCheck width={11} height={11} strokeWidth={2.4} />
-                  ))}
+                {mine && (
+                  <StatusIcon
+                    status={status}
+                    tone={mine ? "on-accent" : "plain"}
+                  />
+                )}
               </span>
             </div>
           )}

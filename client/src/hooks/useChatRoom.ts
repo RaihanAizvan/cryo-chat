@@ -5,7 +5,8 @@ import type {
   Participant,
   ErrorPayload,
 } from "@cryo/shared";
-import { connectAndInit, socket } from "../lib/store";
+import { connectAndInit, socket, useSession } from "../lib/store";
+import { genClientId } from "../lib/ids";
 import { recordRoomHistory, touchRoomHistory } from "../lib/roomHistory";
 
 export interface RoomState {
@@ -29,6 +30,7 @@ export interface RoomActions {
 }
 
 export function useChatRoom(): [RoomState, RoomActions] {
+  const session = useSession();
   const [room, setRoom] = useState<PublicRoom | null>(null);
   const [messages, setMessages] = useState<PublicMessage[]>([]);
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -83,7 +85,19 @@ export function useChatRoom(): [RoomState, RoomActions] {
       setMessages(data.messages);
     };
     const onMessage = (data: { message: PublicMessage }) => {
-      setMessages((prev) => [...prev, data.message]);
+      setMessages((prev) => {
+        const m = data.message;
+        // Optimistic echo: replace the pending copy in place (keeps position,
+        // and removes the pending state so the message shows as sent/seen).
+        if (m.clientId) {
+          const idx = prev.findIndex((p) => p.clientId === m.clientId);
+          if (idx < 0) return [...prev, m];
+          const next = prev.slice();
+          next[idx] = m;
+          return next;
+        }
+        return [...prev, m];
+      });
     };
     const onPresenceJoined = (data: { participant: Participant }) => {
       participantsRef.current = [
@@ -115,6 +129,15 @@ export function useChatRoom(): [RoomState, RoomActions] {
       flashNotice("This room was closed.");
     };
     const onError = (err: ErrorPayload) => {
+      // A message-specific error marks the matching optimistic bubble as failed.
+      if (err.clientId) {
+        setMessages((prev) =>
+          prev.map((p) =>
+            p.clientId === err.clientId ? { ...p, status: "failed" } : p,
+          ),
+        );
+        return;
+      }
       switch (err.code) {
         case "room_not_found":
           setJoinError("That room doesn't exist. Check the code and try again.");
@@ -189,11 +212,31 @@ export function useChatRoom(): [RoomState, RoomActions] {
     exitRoom();
   }, [exitRoom]);
 
-  const sendMessage = useCallback((text: string) => {
-    const id = roomRef.current?.id;
-    if (!id || !text.trim()) return;
-    socket.emit("message:send", { roomId: id, text });
-  }, []);
+  const sendMessage = useCallback(
+    (text: string) => {
+      const r = roomRef.current;
+      const trimmed = text.trim();
+      if (!r || !trimmed) return;
+      const clientId = genClientId();
+      // Optimistic append (WhatsApp-style): show the bubble instantly with a
+      // clock, then flip to a tick once the server echoes it (message:new).
+      const optimistic: PublicMessage = {
+        id: `local-${clientId}`,
+        roomId: r.id,
+        participantId: session.sessionId ?? "",
+        name: session.name ?? "You",
+        color: session.color,
+        text: trimmed,
+        sentAt: Date.now(),
+        kind: "user",
+        clientId,
+        status: "pending",
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      socket.emit("message:send", { roomId: r.id, text: trimmed, clientId });
+    },
+    [session],
+  );
 
   return [
     { room, messages, participants, notice, joinError },
