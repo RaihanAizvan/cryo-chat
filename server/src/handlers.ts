@@ -23,10 +23,73 @@ const messageLimiter = new RateLimiter(
 /** Internal participant nonce bound to a socket within a room. */
 const ROOM_MEMBERSHIP = new WeakMap<Socket, { room: rooms.Room; pid: string }>();
 
+/** A disconnected participant stays in their room this long before being dropped. */
+const DEPARTURE_GRACE_MS = 30_000;
+
+/** Pending departures keyed by `${roomId}::${sessionId}`, cancelled on recovery. */
+const pendingDepartures = new Map<string, NodeJS.Timeout>();
+
+function departKey(roomId: string, sessionId: string): string {
+  return `${roomId}::${sessionId}`;
+}
+
+function cancelDeparture(roomId: string, sessionId: string): void {
+  const t = pendingDepartures.get(departKey(roomId, sessionId));
+  if (t) {
+    clearTimeout(t);
+    pendingDepartures.delete(departKey(roomId, sessionId));
+  }
+}
+
+/** Cancel all pending departures for a room (closed/expired rooms). */
+function cancelDeparturesForRoom(roomId: string): void {
+  for (const [k, t] of pendingDepartures) {
+    if (k.startsWith(`${roomId}::`)) {
+      clearTimeout(t);
+      pendingDepartures.delete(k);
+    }
+  }
+}
+
+/** After a disconnect, give the client a grace window to recover before leaving. */
+function scheduleDeparture(
+  io: Server,
+  socket: Socket,
+  room: rooms.Room,
+  sessionId: string,
+): void {
+  cancelDeparture(room.id, sessionId);
+  const t = setTimeout(() => {
+    pendingDepartures.delete(departKey(room.id, sessionId));
+    // No-op if the client recovered and re-seated its membership; the socket.id
+    // is preserved by connection-state recovery, so the map lookup stays valid.
+    if (!room.sockets.has(socket.id)) return;
+    leaveRoom(io, socket, room);
+  }, DEPARTURE_GRACE_MS);
+  pendingDepartures.set(departKey(room.id, sessionId), t);
+}
+
 export function attachHandlers(io: Server, socket: Socket): void {
   // Allow resuming a persisted session id (sent as a connection query).
   const requestedSessionId = (socket.handshake.query?.sessionId as string | undefined);
   const session = getSession(socket, requestedSessionId);
+
+  // Connection-state recovery succeeded: the server restored our socket id and
+  // room membership. Re-link the membership bookkeeping and resend the current
+  // room snapshot so the client is seamlessly back in the conversation.
+  if (socket.recovered) {
+    for (const room of rooms.allRooms()) {
+      if (!room.sockets.has(socket.id)) continue;
+      ROOM_MEMBERSHIP.set(socket, { room, pid: room.sockets.get(socket.id)! });
+      cancelDeparture(room.id, session.id);
+      socket.emit("room:joined", {
+        room: rooms.toPublicRoom(room, socket.id, room.hostParticipantId),
+      });
+      socket.emit("message:history", { messages: rooms.getMessages(room) });
+      break;
+    }
+  }
+
   socket.emit("session:init", {
     sessionId: session.id,
     name: session.name,
@@ -166,10 +229,10 @@ export function attachHandlers(io: Server, socket: Socket): void {
     io.to(membership.room.id).emit("message:new", { message });
   });
 
-  socket.on("disconnect", (reason) => {
+  socket.on("disconnect", () => {
     const membership = ROOM_MEMBERSHIP.get(socket);
     if (membership) {
-      leaveRoom(io, socket, membership.room);
+      scheduleDeparture(io, socket, membership.room, session.id);
     }
   });
 }
@@ -180,6 +243,8 @@ function joinInternal(
   room: rooms.Room,
 ): boolean {
   const session = getSession(socket);
+  // A fresh join means the participant is back — cancel any pending departure.
+  cancelDeparture(room.id, session.id);
   // If the socket is already in another room, leave it first.
   const existing = ROOM_MEMBERSHIP.get(socket);
   if (existing) {
@@ -234,6 +299,7 @@ function leaveRoom(io: Server, socket: Socket, room: rooms.Room): void {
 /** Close a room: kick everyone, announce it, and destroy it. */
 function closeRoom(io: Server, room: rooms.Room): void {
   io.to(room.id).emit("room:closed", { roomId: room.id });
+  cancelDeparturesForRoom(room.id);
   for (const sid of room.sockets.keys()) {
     const s = io.sockets.sockets.get(sid);
     if (s) ROOM_MEMBERSHIP.delete(s);
@@ -248,6 +314,7 @@ export function startSweeper(io: Server): NodeJS.Timeout {
     for (const room of rooms.allRooms()) {
       if (rooms.isExpired(room)) {
         io.to(room.id).emit("room:expired", { roomId: room.id });
+        cancelDeparturesForRoom(room.id);
         // Force-disconnect members.
         for (const sid of room.sockets.keys()) {
           const s = io.sockets.sockets.get(sid);

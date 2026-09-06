@@ -17,6 +17,12 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: socketIoCors,
   serveClient: false,
+  // Phones/backgrounds drop connections for seconds at a time. Ride out brief
+  // gaps: the server restores a returning client's rooms and replay-misses,
+  // so switching apps no longer feels like a hard reconnect.
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 120_000,
+  },
 });
 
 // Per-IP socket limit tracked here (close to connection lifecycle).
