@@ -17,6 +17,8 @@ export interface RoomState {
   notice: string | null;
   /** Last room join/create error (surfaced on the landing screen). */
   joinError: string | null;
+  /** Modal alert for a room that was closed or expired behind the user. */
+  alert: { title: string; message: string } | null;
 }
 
 export interface RoomActions {
@@ -27,6 +29,7 @@ export interface RoomActions {
   sendMessage: (text: string) => void;
   clearNotice: () => void;
   clearJoinError: () => void;
+  dismissAlert: () => void;
 }
 
 export function useChatRoom(): [RoomState, RoomActions] {
@@ -36,19 +39,13 @@ export function useChatRoom(): [RoomState, RoomActions] {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [alert, setAlert] = useState<RoomState["alert"]>(null);
 
   // Mutable refs so stable event handlers read latest values.
   const roomRef = useRef<PublicRoom | null>(null);
   const participantsRef = useRef<Participant[]>([]);
-  const noticeTimer = useRef<number | null>(null);
 
   const clearNotice = useCallback(() => setNotice(null), []);
-
-  const flashNotice = (msg: string) => {
-    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
-    setNotice(msg);
-    noticeTimer.current = window.setTimeout(() => setNotice(null), 3200);
-  };
 
   const enterRoom = useCallback((r: PublicRoom, msgs: PublicMessage[]) => {
     roomRef.current = r;
@@ -121,12 +118,24 @@ export function useChatRoom(): [RoomState, RoomActions] {
       setParticipants(participantsRef.current);
     };
     const onExpired = () => {
+      const code = roomRef.current?.code;
       exitRoom();
-      flashNotice("This room has expired.");
+      setAlert({
+        title: "This room has expired.",
+        message: code
+          ? `Room ${code} faded away — rooms vanish when they're left alone. Start a new one?`
+          : "Rooms fade away when they're left alone. Start a new one?",
+      });
     };
     const onClosed = () => {
+      const code = roomRef.current?.code;
       exitRoom();
-      flashNotice("This room was closed.");
+      setAlert({
+        title: "This room was closed.",
+        message: code
+          ? `Room ${code} was closed. It can be reopened anytime with the same code.`
+          : "This room was closed. It can be reopened anytime with the same code.",
+      });
     };
     const onError = (err: ErrorPayload) => {
       // A message-specific error marks the matching optimistic bubble as failed.
@@ -198,6 +207,8 @@ export function useChatRoom(): [RoomState, RoomActions] {
 
   const clearJoinError = useCallback(() => setJoinError(null), []);
 
+  const dismissAlert = useCallback(() => setAlert(null), []);
+
   const leaveRoom = useCallback(() => {
     const id = roomRef.current?.id;
     if (id) socket.emit("room:leave", { roomId: id });
@@ -239,7 +250,16 @@ export function useChatRoom(): [RoomState, RoomActions] {
   );
 
   return [
-    { room, messages, participants, notice, joinError },
-    { createRoom, joinRoom, leaveRoom, closeRoom, sendMessage, clearNotice, clearJoinError },
+    { room, messages, participants, notice, joinError, alert },
+    {
+      createRoom,
+      joinRoom,
+      leaveRoom,
+      closeRoom,
+      sendMessage,
+      clearNotice,
+      clearJoinError,
+      dismissAlert,
+    },
   ];
 }

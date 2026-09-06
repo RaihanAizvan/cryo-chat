@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { useChatRoom } from "./hooks/useChatRoom";
 import { LandingScreen } from "./components/landing/LandingScreen";
 import { ChatRoom } from "./components/chat/ChatRoom";
+import { Modal } from "./components/ui/Modal";
+import { IconAlertTriangle } from "./components/ui/Icon";
 
 /**
  * Pull a room target from the URL:
@@ -42,6 +44,30 @@ export function App() {
         <ChatRoom state={state} actions={actions} />
       ) : (
         <LandingScreen state={state} actions={actions} />
+      )}
+
+      {/* Alert shown when the room the user was in gets closed or expires. */}
+      {state.alert && (
+        <Modal onClose={actions.dismissAlert} title="Room alert">
+          <div className="flex flex-col items-center gap-2 px-2 pb-1 pt-3 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-500/15 text-rose-400">
+              <IconAlertTriangle width={24} height={24} />
+            </span>
+            <h2 className="text-lg font-semibold tracking-tight text-ink">
+              {state.alert.title}
+            </h2>
+            <p className="text-sm leading-relaxed text-ink-muted">
+              {state.alert.message}
+            </p>
+            <button
+              onClick={actions.dismissAlert}
+              autoFocus
+              className="mt-4 w-full rounded-2xl bg-accent py-3 text-[15px] font-semibold text-white transition-transform active:scale-[0.99]"
+            >
+              Got it
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );
