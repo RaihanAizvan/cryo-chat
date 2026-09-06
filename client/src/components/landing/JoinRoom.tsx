@@ -33,7 +33,8 @@ export function JoinRoom({ error, onErrorClear, onClose, onJoin }: Props) {
       </div>
 
       <p className="mb-4 text-sm text-ink-muted">
-        Enter the 4-digit room code shared with you.
+        Enter a 4-digit code. If that room doesn't exist yet, we'll start one
+        with that code for you.
       </p>
 
       <input

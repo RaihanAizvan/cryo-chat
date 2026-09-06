@@ -48,10 +48,14 @@ export function useChatRoom(): [RoomState, RoomActions] {
   // Mutable refs so stable event handlers read latest values.
   const roomRef = useRef<PublicRoom | null>(null);
   const participantsRef = useRef<Participant[]>([]);
+  // A join-by-code that missed: remember it so we can create the room with that
+  // exact code instead of showing a "room not available" dead end.
+  const pendingJoinCode = useRef<string | null>(null);
 
   const clearNotice = useCallback(() => setNotice(null), []);
 
   const enterRoom = useCallback((r: PublicRoom, msgs: PublicMessage[]) => {
+    pendingJoinCode.current = null;
     roomRef.current = r;
     participantsRef.current = r.participants;
     setRoom(r);
@@ -66,6 +70,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
   }, []);
 
   const exitRoom = useCallback(() => {
+    pendingJoinCode.current = null;
     roomRef.current = null;
     participantsRef.current = [];
     setRoom(null);
@@ -169,7 +174,24 @@ export function useChatRoom(): [RoomState, RoomActions] {
       }
       switch (err.code) {
         case "room_not_found":
+          // Join-by-code missed → create the room with that exact code instead
+          // of a dead-end error. Guarded to well-formed codes only.
+          if (pendingJoinCode.current && /^[A-Z0-9]{4}$/.test(pendingJoinCode.current)) {
+            const code = pendingJoinCode.current;
+            pendingJoinCode.current = null;
+            socket.emit("room:create", { code });
+            return;
+          }
           setJoinError("That room doesn't exist. Check the code and try again.");
+          break;
+        case "room_exists":
+          // A room with the typed code appeared mid-flight → just join it.
+          if (pendingJoinCode.current) {
+            const code = pendingJoinCode.current;
+            pendingJoinCode.current = null;
+            socket.emit("room:join", { code });
+            return;
+          }
           break;
         case "room_full":
           setJoinError("That room is full right now.");
@@ -213,6 +235,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
 
   const createRoom = useCallback(() => {
     setJoinError(null);
+    pendingJoinCode.current = null;
     socket.emit("room:create", {});
   }, []);
 
@@ -221,8 +244,11 @@ export function useChatRoom(): [RoomState, RoomActions] {
     if (!trimmed) return;
     setJoinError(null);
     if (trimmed.length <= 8) {
-      socket.emit("room:join", { code: trimmed.toUpperCase() });
+      const code = trimmed.toUpperCase();
+      pendingJoinCode.current = code;
+      socket.emit("room:join", { code });
     } else {
+      pendingJoinCode.current = null;
       socket.emit("room:join", { roomId: trimmed });
     }
   }, []);
