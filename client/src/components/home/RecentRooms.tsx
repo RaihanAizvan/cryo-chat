@@ -43,10 +43,10 @@ function HistoryCard({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border transition-colors ${
+      className={`relative overflow-hidden rounded-2xl border transition-all duration-200 ${
         featured
-          ? "border-accent/40 bg-accent/5"
-          : "border-base-border bg-base-raised"
+          ? "border-accent/40 bg-accent/5 hover:-translate-y-0.5"
+          : "border-base-border bg-base-raised hover:-translate-y-0.5 hover:border-base-border2"
       }`}
     >
       <span
@@ -176,9 +176,11 @@ export function RecentRooms({ onJoin }: Props) {
             <HistoryCard entry={featured} featured onJoin={onJoin} />
           </div>
         )}
-        {rest.map((e) => (
-          <HistoryCard key={e.id} entry={e} onJoin={onJoin} />
-        ))}
+        <div className="stagger flex flex-col gap-2.5">
+          {rest.map((e) => (
+            <HistoryCard key={e.id} entry={e} onJoin={onJoin} />
+          ))}
+        </div>
       </div>
     </section>
   );
