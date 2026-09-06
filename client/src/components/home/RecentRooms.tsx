@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { avatarColor } from "@cryo/shared";
 import {
   useRoomHistory,
   roomStatus,
@@ -7,24 +6,30 @@ import {
   clearRoomHistory,
   type HistoryEntry,
 } from "../../lib/roomHistory";
-import { timeAgo, formatCountdown } from "../../lib/format";
+import { timeAgo } from "../../lib/format";
 import { useNow } from "../../hooks/useNow";
-import { IconUsers, IconX, IconArrowRight, IconCheck, IconLink } from "../ui/Icon";
+import { Avatar } from "../ui/Avatar";
+import { IconX, IconCheck, IconLink } from "../ui/Icon";
 import { roomShareLink } from "../chat/ShareRoom";
 
 interface Props {
-  onJoin: (roomId: string) => void;
+  onJoin: (code: string) => void;
 }
 
-/** Clickable card for a previously visited room, with live/expired status. */
-function HistoryCard({
+/** The display name of a chat, like a contact row in a messenger. */
+function roomName(entry: HistoryEntry): string {
+  if (entry.persistent) return "Your space";
+  // When it was last a two-person chat it reads like a direct conversation.
+  return entry.lastParticipants <= 2 ? "Private chat" : `Room ${entry.code}`;
+}
+
+/** One chat row: avatar (dp), name + time on top, people + status below. */
+function HistoryRow({
   entry,
-  featured,
   onJoin,
 }: {
   entry: HistoryEntry;
-  featured?: boolean;
-  onJoin: (id: string) => void;
+  onJoin: (code: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const now = useNow(1000);
@@ -42,122 +47,87 @@ function HistoryCard({
   };
 
   return (
-    <div
-      className={`relative overflow-hidden rounded-2xl border transition-all duration-200 ${
-        featured
-          ? "border-accent/40 bg-accent/5 hover:-translate-y-0.5"
-          : "border-base-border bg-base-raised hover:-translate-y-0.5 hover:border-base-border2"
-      }`}
-    >
-      <span
-        className="absolute inset-y-0 left-0 w-1"
-        style={{ background: avatarColor(entry.color) }}
-      />
-      <div className="flex w-full items-center gap-3 py-3 pl-4 pr-3">
+    <li className="flex w-full items-center gap-2 rounded-xl transition-colors hover:bg-base-raised active:bg-base-border">
+      <button
+        onClick={() => onJoin(entry.code)}
+        className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-2 text-left"
+      >
+        <Avatar name={roomName(entry)} color={entry.color} size="md" />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="truncate text-[15px] font-semibold text-ink">
+              {roomName(entry)}
+            </span>
+            <span className="shrink-0 text-[11px] tabular-nums text-ink-faint">
+              {timeAgo(entry.lastVisitedAt, now)}
+            </span>
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[13px]">
+            <span className="truncate text-ink-muted">
+              {entry.lastParticipants || 1}{" "}
+              {entry.lastParticipants === 1 ? "person" : "people"}
+              {!live && (
+                <span
+                  className={`font-medium ${
+                    status === "closed" ? "text-rose-300" : "text-ink-faint"
+                  }`}
+                >
+                  {" "}
+                  · {status === "closed" ? "closed" : "expired"}
+                </span>
+              )}
+            </span>
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+              className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
                 live
                   ? "bg-emerald-500/15 text-emerald-300"
                   : status === "closed"
                     ? "bg-rose-500/10 text-rose-300"
-                    : "bg-slate-500/15 text-slate-300"
+                    : "bg-slate-500/10 text-slate-300"
               }`}
             >
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  live ? "bg-emerald-400" : status === "closed" ? "bg-rose-400" : "bg-slate-400"
-                }`}
-              />
-              {live ? "Active" : status === "closed" ? "Closed" : "Expired"}
-            </span>
-            <span className="font-mono text-[12px] font-semibold tracking-widest text-ink">
-              {entry.code}
+              {live ? (entry.persistent ? "open" : "active") : status}
             </span>
           </div>
-
-          <div
-            className={`mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${
-              featured ? "text-ink-muted" : "text-ink-faint"
-            }`}
-          >
-            <span className="inline-flex items-center gap-1">
-              <IconUsers width={13} height={13} />
-              {entry.lastParticipants || 1}{" "}
-              {entry.lastParticipants === 1 ? "person" : "people"}
-            </span>
-            <span className="font-mono tabular-nums">
-              {entry.persistent
-                ? live
-                  ? "always open"
-                  : "closed for now"
-                : live
-                  ? `expires in ${formatCountdown(entry.expiresAt, now)}`
-                  : status === "closed"
-                    ? "closed"
-                    : "room vanished"}
-            </span>
-            <span>· {timeAgo(entry.lastVisitedAt, now)}</span>
-          </div>
         </div>
-
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            onClick={copyLink}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-base-border active:bg-base-border2"
-            aria-label="Copy invite link"
-            title="Copy invite link"
-          >
-            {copied ? (
-              <IconCheck width={16} height={16} className="text-emerald-400" />
-            ) : (
-              <IconLink width={16} height={16} />
-            )}
-          </button>
-          <button
-            onClick={() => removeRoomHistory(entry.id)}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-base-border active:bg-base-border2"
-            aria-label="Remove from history"
-            title="Remove from history"
-          >
-            <IconX width={16} height={16} />
-          </button>
-        </div>
-      </div>
-      <button
-        onClick={() => onJoin(entry.id)}
-        className={`flex w-full items-center justify-center gap-2 border-t py-2.5 text-[13px] font-semibold transition-colors ${
-          featured
-            ? "border-accent/20 bg-accent/10 text-accent active:bg-accent/20"
-            : live
-              ? "border-base-border text-ink active:bg-base-border"
-              : "border-base-border text-ink-faint active:bg-base-border"
-        }`}
-      >
-        {entry.persistent ? "Open your space" : live ? "Continue" : status === "closed" ? "Reopen" : "Try reopening"}
-        <IconArrowRight width={15} height={15} />
       </button>
-    </div>
+
+      <div className="flex shrink-0 items-center gap-0.5 pr-1">
+        <button
+          onClick={copyLink}
+          className="flex h-9 w-9 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-base-border active:bg-base-border2"
+          aria-label="Copy invite link"
+          title="Copy invite link"
+        >
+          {copied ? (
+            <IconCheck width={16} height={16} className="text-emerald-400" />
+          ) : (
+            <IconLink width={16} height={16} />
+          )}
+        </button>
+        <button
+          onClick={() => removeRoomHistory(entry.id)}
+          className="flex h-9 w-9 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-base-border active:bg-base-border2"
+          aria-label="Remove from history"
+          title="Remove from history"
+        >
+          <IconX width={16} height={16} />
+        </button>
+      </div>
+    </li>
   );
 }
 
 export function RecentRooms({ onJoin }: Props) {
   const history = useRoomHistory();
-  const now = useNow(1000);
 
   if (history.length === 0) return null;
 
-  // Promote the most recently visited live room.
-  const live = history.filter((e) => roomStatus(e, now) === "live");
-  const featured = live.length > 0 ? live[0] : undefined;
-  const rest = history.filter((e) => e.id !== featured?.id);
-
   return (
-    <section className="w-full px-6">
-      <div className="mb-2 flex items-center justify-between">
+    <section className="w-full px-4">
+      <div className="mb-1 flex items-center justify-between px-2">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-faint">
-          Recent rooms
+          Recent
         </h2>
         <button
           onClick={clearRoomHistory}
@@ -167,21 +137,11 @@ export function RecentRooms({ onJoin }: Props) {
         </button>
       </div>
 
-      <div className="flex flex-col gap-2.5">
-        {featured && (
-          <div>
-            <p className="mb-1.5 px-1 text-xs font-medium text-accent">
-              Continue where you left off
-            </p>
-            <HistoryCard entry={featured} featured onJoin={onJoin} />
-          </div>
-        )}
-        <div className="stagger flex flex-col gap-2.5">
-          {rest.map((e) => (
-            <HistoryCard key={e.id} entry={e} onJoin={onJoin} />
-          ))}
-        </div>
-      </div>
+      <ul className="stagger flex flex-col py-1">
+        {history.map((e) => (
+          <HistoryRow key={e.id} entry={e} onJoin={onJoin} />
+        ))}
+      </ul>
     </section>
   );
 }

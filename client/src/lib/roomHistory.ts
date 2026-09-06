@@ -13,7 +13,8 @@ import { useSyncExternalStore } from "react";
 import type { AvatarColor, PublicRoom, RoomStatus } from "@cryo/shared";
 
 const STORAGE_KEY = "cryo_history_v1";
-const MAX_ENTRIES = 12;
+/** Keep the list tight and WhatsApp-like: at most 10 recent rooms. */
+const MAX_ENTRIES = 10;
 
 export type HistoryStatus = "live" | "closed" | "expired";
 
