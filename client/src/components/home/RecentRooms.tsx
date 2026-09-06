@@ -28,7 +28,8 @@ function HistoryCard({
 }) {
   const [copied, setCopied] = useState(false);
   const now = useNow(1000);
-  const live = roomStatus(entry, now) === "live";
+  const status = roomStatus(entry, now);
+  const live = status === "live";
 
   const copyLink = async () => {
     try {
@@ -59,15 +60,17 @@ function HistoryCard({
               className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                 live
                   ? "bg-emerald-500/15 text-emerald-300"
-                  : "bg-rose-500/10 text-rose-300"
+                  : status === "closed"
+                    ? "bg-rose-500/10 text-rose-300"
+                    : "bg-slate-500/15 text-slate-300"
               }`}
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
-                  live ? "bg-emerald-400" : "bg-rose-400"
+                  live ? "bg-emerald-400" : status === "closed" ? "bg-rose-400" : "bg-slate-400"
                 }`}
               />
-              {live ? "Active" : "Expired"}
+              {live ? "Active" : status === "closed" ? "Closed" : "Expired"}
             </span>
             <span className="font-mono text-[12px] font-semibold tracking-widest text-ink">
               {entry.code}
@@ -86,12 +89,17 @@ function HistoryCard({
             </span>
             <span className="font-mono tabular-nums">
               {entry.persistent
-                ? "always open"
+                ? live
+                  ? "always open"
+                  : "closed for now"
                 : live
                   ? `expires in ${formatCountdown(entry.expiresAt, now)}`
-                  : "room vanished"}
+                  : status === "closed"
+                    ? "closed"
+                    : "room vanished"}
             </span>
-            <span>· {timeAgo(entry.lastVisitedAt, now)}</span>          </div>
+            <span>· {timeAgo(entry.lastVisitedAt, now)}</span>
+          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -127,7 +135,7 @@ function HistoryCard({
               : "border-base-border text-ink-faint active:bg-base-border"
         }`}
       >
-        {entry.persistent ? "Open your space" : live ? "Continue" : "Try reopening"}
+        {entry.persistent ? "Open your space" : live ? "Continue" : status === "closed" ? "Reopen" : "Try reopening"}
         <IconArrowRight width={15} height={15} />
       </button>
     </div>

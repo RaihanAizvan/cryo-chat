@@ -10,17 +10,17 @@
  */
 
 import { useSyncExternalStore } from "react";
-import type { AvatarColor, PublicRoom } from "@cryo/shared";
+import type { AvatarColor, PublicRoom, RoomStatus } from "@cryo/shared";
 
 const STORAGE_KEY = "cryo_history_v1";
 const MAX_ENTRIES = 12;
 
-export type RoomStatus = "live" | "expired";
+export type HistoryStatus = "live" | "closed" | "expired";
 
 export interface HistoryEntry {
   /** Room id — also the /r/:id deep-link path. */
   id: string;
-  /** 8-char join code. */
+  /** 4-digit join code. */
   code: string;
   color: AvatarColor;
   /** When the room was first created/joined. */
@@ -34,6 +34,8 @@ export interface HistoryEntry {
   isHost: boolean;
   /** True for the preserved special room: never auto-expires. */
   persistent: boolean;
+  /** True once the room is known to be closed (not just expired). */
+  closed: boolean;
 }
 
 type Listener = () => void;
@@ -70,6 +72,7 @@ class RoomHistoryStore {
       lastParticipants: room.participants.length,
       isHost: meta.isHost,
       persistent: room.persistent,
+      closed: false,
     };
     if (idx >= 0) this.entries.splice(idx, 1);
     this.entries.unshift(entry);
@@ -89,11 +92,41 @@ class RoomHistoryStore {
       ...e,
       lastVisitedAt: Date.now(),
       lastParticipants: participantCount,
-      expiresAt: room.expiresAt,
+      expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+      persistent: room.persistent,
+      closed: false,
     };
     this.entries.splice(idx, 1);
     this.entries.unshift(updated);
     this.commit();
+  }
+
+  /** Apply live server status to saved rooms (open/closed + participant counts). */
+  applyStatus(statuses: RoomStatus[]): void {
+    let changed = false;
+    for (const st of statuses) {
+      const idx = this.entries.findIndex(
+        (e) => e.id === st.roomId || (st.code && e.code === st.code),
+      );
+      if (idx < 0) continue;
+      const e = this.entries[idx];
+      const updated: HistoryEntry = {
+        ...e,
+        lastParticipants: st.exists ? st.participantCount : e.lastParticipants,
+        closed: !st.exists,
+        // A persistent room is never considered expired (stays "always open"),
+        // but it IS closed when the server reports it gone.
+        expiresAt: st.exists
+          ? st.persistent
+            ? Number.MAX_SAFE_INTEGER
+            : st.expiresAt
+          : Date.now(),
+      };
+      this.entries.splice(idx, 1);
+      this.entries.unshift(updated);
+      changed = true;
+    }
+    if (changed) this.commit();
   }
 
   remove(id: string): void {
@@ -135,6 +168,11 @@ export function touchRoomHistory(room: PublicRoom, participantCount: number): vo
   store.touch(room, participantCount);
 }
 
+/** Apply live server status snapshots to saved rooms. */
+export function applyRoomStatus(statuses: RoomStatus[]): void {
+  store.applyStatus(statuses);
+}
+
 export function removeRoomHistory(id: string): void {
   store.remove(id);
 }
@@ -143,8 +181,9 @@ export function clearRoomHistory(): void {
   store.clear();
 }
 
-/** Resolve the live/expired status of a history entry right now. */
-export function roomStatus(entry: HistoryEntry, now = Date.now()): RoomStatus {
+/** Resolve the live/closed/expired status of a history entry right now. */
+export function roomStatus(entry: HistoryEntry, now = Date.now()): HistoryStatus {
+  if (entry.closed) return "closed";
   return now < entry.expiresAt ? "live" : "expired";
 }
 

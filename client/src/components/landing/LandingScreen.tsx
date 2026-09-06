@@ -7,6 +7,7 @@ import { JoinRoom } from "./JoinRoom";
 import { NameEditor } from "./NameEditor";
 import { ConnectionStatus } from "../chat/ConnectionStatus";
 import { RecentRooms } from "../home/RecentRooms";
+import { useRoomStatusPoller } from "../../hooks/useRoomStatusPoller";
 import type { RoomActions, RoomState } from "../../hooks/useChatRoom";
 
 interface Props {
@@ -26,6 +27,7 @@ export function LandingScreen({ state, actions }: Props) {
   const connection = useConnectionStatus();
   const [joinOpen, setJoinOpen] = useState(false);
   const [editName, setEditName] = useState(false);
+  useRoomStatusPoller();
 
   const connected = connection === "connected";
   const pending = connection === "connecting" || connection === "reconnecting";
