@@ -6,7 +6,7 @@
  */
 
 /** Length alphabet used for room codes and avatar colors. */
-export const ROOM_CODE_SIZE = 8;
+export const ROOM_CODE_SIZE = 4;
 export const ROOM_ID_SIZE = 12;
 export const MAX_MESSAGE_LENGTH = 2000;
 export const MAX_NAME_LENGTH = 24;
