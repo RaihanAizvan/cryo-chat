@@ -17,8 +17,23 @@ const savedSessionId = getStoredSessionId();
 export const socket: Socket = io(serverUrl || "/", {
   autoConnect: false,
   path: "/socket.io",
+  // WebSocket-only transport avoids the long-poll fallback dance that makes
+  // reconnects feel slow on phones when the app is backgrounded.
+  transports: ["websocket"],
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 5000,
+  randomizationFactor: 0.5,
+  timeout: 10_000,
   query: savedSessionId ? { sessionId: savedSessionId } : undefined,
 });
+
+// Timestamps used by useChatRoom to tell a fast background-recovery from a
+// long drop (only the latter needs an explicit re-join).
+export let lastDisconnectAt = 0;
+let lastConnectAt = 0;
+export function wasRecentlyReconnected(): boolean {
+  return lastDisconnectAt > lastConnectAt;
+}
 
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
 
@@ -63,11 +78,13 @@ const session = new ExternalStore<SessionState>({
 });
 
 socket.on("connect", () => {
+  lastConnectAt = Date.now();
   connectionStatus.set("connected");
   session.set({ ...session.get(), connected: true });
 });
 
 socket.on("disconnect", () => {
+  lastDisconnectAt = Date.now();
   connectionStatus.set("disconnected");
   session.set({ ...session.get(), connected: false });
 });

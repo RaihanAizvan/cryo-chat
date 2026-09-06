@@ -5,9 +5,13 @@ import type {
   Participant,
   ErrorPayload,
 } from "@cryo/shared";
-import { connectAndInit, socket, useSession } from "../lib/store";
+import { connectAndInit, socket, useSession, wasRecentlyReconnected, lastDisconnectAt } from "../lib/store";
 import { genClientId } from "../lib/ids";
 import { recordRoomHistory, touchRoomHistory } from "../lib/roomHistory";
+
+// Slightly above the server's connection-state-recovery window (120s): if the
+// drop lasted longer, the server can't restore us, so re-join explicitly.
+const RECONNECT_REJOIN_MS = 125_000;
 
 export interface RoomState {
   room: PublicRoom | null;
@@ -77,6 +81,11 @@ export function useChatRoom(): [RoomState, RoomActions] {
     const onJoined = (data: { room: PublicRoom }) => {
       setJoinError(null);
       enterRoom(data.room, []);
+      if (wasRecentlyReconnected()) {
+        setNotice("Back online ✨");
+        const t = window.setTimeout(() => setNotice(null), 3200);
+        window.setTimeout(() => window.clearTimeout(t), 3500);
+      }
     };
     const onHistory = (data: { messages: PublicMessage[] }) => {
       setMessages(data.messages);
@@ -137,6 +146,17 @@ export function useChatRoom(): [RoomState, RoomActions] {
           : "This room was closed. It can be reopened anytime with the same code.",
       });
     };
+    // Ride out brief backgrounding drops: the server restores the room itself.
+    // Only when the drop outlasted the server's recovery window do we need an
+    // explicit re-join (fresh membership + history).
+    const onConnect = () => {
+      const r = roomRef.current;
+      if (!r) return;
+      const gap = Date.now() - lastDisconnectAt;
+      if (gap > RECONNECT_REJOIN_MS) {
+        socket.emit("room:join", { code: r.code });
+      }
+    };
     const onError = (err: ErrorPayload) => {
       // A message-specific error marks the matching optimistic bubble as failed.
       if (err.clientId) {
@@ -174,6 +194,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
     socket.on("presence:renamed", onPresenceRenamed);
     socket.on("room:expired", onExpired);
     socket.on("room:closed", onClosed);
+    socket.on("connect", onConnect);
     socket.on("error", onError);
 
     return () => {
@@ -185,6 +206,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       socket.off("presence:renamed", onPresenceRenamed);
       socket.off("room:expired", onExpired);
       socket.off("room:closed", onClosed);
+      socket.off("connect", onConnect);
       socket.off("error", onError);
     };
   }, [enterRoom, exitRoom, touchHistory]);
