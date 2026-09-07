@@ -23,6 +23,10 @@ export interface RoomState {
   joinError: string | null;
   /** Modal alert for a room that was closed or expired behind the user. */
   alert: { title: string; message: string } | null;
+  /** Participant IDs currently typing (auto-clears after a timeout). */
+  typingParticipants: string[];
+  /** Per-participant last-read message id (read receipts). */
+  seenBy: Record<string, string>;
 }
 
 export interface RoomActions {
@@ -31,6 +35,10 @@ export interface RoomActions {
   leaveRoom: () => void;
   closeRoom: () => void;
   sendMessage: (text: string) => void;
+  sendTyping: () => void;
+  sendSeen: () => void;
+  clearChat: () => void;
+  renameParticipant: (participantId: string, name: string) => void;
   clearNotice: () => void;
   clearJoinError: () => void;
   dismissAlert: () => void;
@@ -44,13 +52,21 @@ export function useChatRoom(): [RoomState, RoomActions] {
   const [notice, setNotice] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [alert, setAlert] = useState<RoomState["alert"]>(null);
+  const [typingParticipants, setTypingParticipants] = useState<string[]>([]);
+  const [seenBy, setSeenBy] = useState<Record<string, string>>({});
 
   // Mutable refs so stable event handlers read latest values.
   const roomRef = useRef<PublicRoom | null>(null);
   const participantsRef = useRef<Participant[]>([]);
+  const messagesRef = useRef<PublicMessage[]>([]);
+  const seenByRef = useRef<Record<string, string>>({});
   // A join-by-code that missed: remember it so we can create the room with that
   // exact code instead of showing a "room not available" dead end.
   const pendingJoinCode = useRef<string | null>(null);
+  // Typing indicator debounce timer.
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-participant typing timeouts.
+  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const clearNotice = useCallback(() => setNotice(null), []);
 
@@ -58,6 +74,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
     pendingJoinCode.current = null;
     roomRef.current = r;
     participantsRef.current = r.participants;
+    messagesRef.current = msgs;
     setRoom(r);
     setMessages(msgs);
     setParticipants(r.participants);
@@ -73,9 +90,13 @@ export function useChatRoom(): [RoomState, RoomActions] {
     pendingJoinCode.current = null;
     roomRef.current = null;
     participantsRef.current = [];
+    messagesRef.current = [];
+    seenByRef.current = {};
     setRoom(null);
     setMessages([]);
     setParticipants([]);
+    setSeenBy({});
+    setTypingParticipants([]);
   }, []);
 
   useEffect(() => {
@@ -86,6 +107,15 @@ export function useChatRoom(): [RoomState, RoomActions] {
     const onJoined = (data: { room: PublicRoom }) => {
       setJoinError(null);
       enterRoom(data.room, []);
+      // Seed read receipts for any participants whose position we already know.
+      const seen: Record<string, string> = {};
+      for (const p of data.room.participants) {
+        if (p.id !== session.sessionId && p.lastSeenMessageId) {
+          seen[p.id] = p.lastSeenMessageId;
+        }
+      }
+      seenByRef.current = seen;
+      setSeenBy(seen);
       if (wasRecentlyReconnected()) {
         setNotice("Back online ✨");
         const t = window.setTimeout(() => setNotice(null), 3200);
@@ -93,6 +123,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       }
     };
     const onHistory = (data: { messages: PublicMessage[] }) => {
+      messagesRef.current = data.messages;
       setMessages(data.messages);
     };
     const onMessage = (data: { message: PublicMessage }) => {
@@ -100,14 +131,20 @@ export function useChatRoom(): [RoomState, RoomActions] {
         const m = data.message;
         // Optimistic echo: replace the pending copy in place (keeps position,
         // and removes the pending state so the message shows as sent/seen).
+        let next: PublicMessage[];
         if (m.clientId) {
           const idx = prev.findIndex((p) => p.clientId === m.clientId);
-          if (idx < 0) return [...prev, m];
-          const next = prev.slice();
-          next[idx] = m;
-          return next;
+          if (idx < 0) next = [...prev, m];
+          else {
+            next = prev.slice();
+            next[idx] = m;
+          }
+        } else {
+          // System pills (joined/left/cleared) always append.
+          next = [...prev, m];
         }
-        return [...prev, m];
+        messagesRef.current = next;
+        return next;
       });
     };
     const onPresenceJoined = (data: { participant: Participant }) => {
@@ -130,6 +167,35 @@ export function useChatRoom(): [RoomState, RoomActions] {
         p.id === data.participantId ? { ...p, name: data.name } : p,
       );
       setParticipants(participantsRef.current);
+    };
+    const onTyping = (data: { participantId: string; name: string }) => {
+      if (data.participantId === session.sessionId) return;
+      setTypingParticipants((prev) =>
+        prev.includes(data.participantId)
+          ? prev
+          : [...prev, data.participantId],
+      );
+      // Auto-clear after a short silence.
+      const existing = typingTimeoutsRef.current.get(data.participantId);
+      if (existing) clearTimeout(existing);
+      const t = setTimeout(() => {
+        setTypingParticipants((prev) =>
+          prev.filter((id) => id !== data.participantId),
+        );
+        typingTimeoutsRef.current.delete(data.participantId);
+      }, 2500);
+      typingTimeoutsRef.current.set(data.participantId, t);
+    };
+    const onSeen = (data: { participantId: string; lastSeenMessageId: string }) => {
+      if (data.participantId === session.sessionId) return;
+      seenByRef.current = { ...seenByRef.current, [data.participantId]: data.lastSeenMessageId };
+      setSeenBy(seenByRef.current);
+    };
+    const onCleared = () => {
+      messagesRef.current = [];
+      seenByRef.current = {};
+      setMessages([]);
+      setSeenBy({});
     };
     const onExpired = () => {
       const code = roomRef.current?.code;
@@ -214,6 +280,9 @@ export function useChatRoom(): [RoomState, RoomActions] {
     socket.on("presence:joined", onPresenceJoined);
     socket.on("presence:left", onPresenceLeft);
     socket.on("presence:renamed", onPresenceRenamed);
+    socket.on("presence:typing", onTyping);
+    socket.on("presence:seen", onSeen);
+    socket.on("message:cleared", onCleared);
     socket.on("room:expired", onExpired);
     socket.on("room:closed", onClosed);
     socket.on("connect", onConnect);
@@ -226,12 +295,15 @@ export function useChatRoom(): [RoomState, RoomActions] {
       socket.off("presence:joined", onPresenceJoined);
       socket.off("presence:left", onPresenceLeft);
       socket.off("presence:renamed", onPresenceRenamed);
+      socket.off("presence:typing", onTyping);
+      socket.off("presence:seen", onSeen);
+      socket.off("message:cleared", onCleared);
       socket.off("room:expired", onExpired);
       socket.off("room:closed", onClosed);
       socket.off("connect", onConnect);
       socket.off("error", onError);
     };
-  }, [enterRoom, exitRoom, touchHistory]);
+  }, [enterRoom, exitRoom, touchHistory, session.sessionId]);
 
   const createRoom = useCallback(() => {
     setJoinError(null);
@@ -271,6 +343,40 @@ export function useChatRoom(): [RoomState, RoomActions] {
     exitRoom();
   }, [exitRoom]);
 
+  // Typing indicator: throttle so we don't spam the socket while typing.
+  const sendTyping = useCallback(() => {
+    if (typingTimerRef.current) return;
+    const r = roomRef.current;
+    if (!r) return;
+    socket.emit("message:typing", { roomId: r.id });
+    typingTimerRef.current = setTimeout(() => {
+      typingTimerRef.current = null;
+    }, 1200);
+  }, []);
+
+  // Read receipt: inform the room that I've read up to the last message.
+  // System pills (joined/left/cleared) don't advance the read position.
+  const sendSeen = useCallback(() => {
+    const r = roomRef.current;
+    if (!r) return;
+    const last = messagesRef.current[messagesRef.current.length - 1];
+    if (last && last.kind !== "system" && last.participantId !== session.sessionId) {
+      socket.emit("message:seen", { roomId: r.id, messageId: last.id });
+    }
+  }, [session.sessionId]);
+
+  const clearChat = useCallback(() => {
+    const r = roomRef.current;
+    if (!r) return;
+    socket.emit("room:clear", { roomId: r.id });
+  }, []);
+
+  const renameParticipantRoom = useCallback((participantId: string, name: string) => {
+    const r = roomRef.current;
+    if (!r) return;
+    socket.emit("room:rename", { roomId: r.id, participantId, name });
+  }, []);
+
   const sendMessage = useCallback(
     (text: string) => {
       const r = roomRef.current;
@@ -291,20 +397,37 @@ export function useChatRoom(): [RoomState, RoomActions] {
         clientId,
         status: "pending",
       };
-      setMessages((prev) => [...prev, optimistic]);
+      setMessages((prev) => {
+        const next = [...prev, optimistic];
+        messagesRef.current = next;
+        return next;
+      });
       socket.emit("message:send", { roomId: r.id, text: trimmed, clientId });
     },
     [session],
   );
 
   return [
-    { room, messages, participants, notice, joinError, alert },
+    {
+      room,
+      messages,
+      participants,
+      notice,
+      joinError,
+      alert,
+      typingParticipants,
+      seenBy,
+    },
     {
       createRoom,
       joinRoom,
       leaveRoom,
       closeRoom,
       sendMessage,
+      sendTyping,
+      sendSeen,
+      clearChat,
+      renameParticipant: renameParticipantRoom,
       clearNotice,
       clearJoinError,
       dismissAlert,
