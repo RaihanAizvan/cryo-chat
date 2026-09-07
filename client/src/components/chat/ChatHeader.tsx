@@ -161,17 +161,34 @@ export function ChatHeader({
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-2">
-                <span className="truncate text-[15px] font-semibold text-ink">
-                  {participantCount === 2
-                    ? "Private chat"
-                    : `Room · ${participantCount}`}
-                </span>
-                <span className="rounded-md bg-base-border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-ink-muted">
-                  {room.code}
-                </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[15px] font-semibold text-ink">
+                    {participantCount === 2
+                      ? "Private chat"
+                      : `Room · ${participantCount}`}
+                  </span>
+                  <span className="rounded-md bg-base-border px-1.5 py-0.5 font-mono text-[11px] font-semibold tracking-wider text-ink-muted">
+                    {room.code}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  {typing && typing.length > 0 ? (
+                    <span className="flex items-center gap-1 text-ink-muted">
+                      <span className="flex items-center gap-0.5">
+                        <span className="cryo-dot" />
+                        <span className="cryo-dot" style={{ animationDelay: "0.15s" }} />
+                        <span className="cryo-dot" style={{ animationDelay: "0.3s" }} />
+                      </span>
+                      {participantCount > 2
+                        ? `${participants.find((p) => p.id === typing[0])?.name ?? "Someone"} is typing…`
+                        : "typing…"}
+                    </span>
+                  ) : (
+                    <ConnectionStatus />
+                  )}
+                </div>
               </div>
-              <ConnectionStatus />
             </>
           )}
         </div>

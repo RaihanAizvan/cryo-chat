@@ -68,11 +68,7 @@ export function ChatRoom({ state, actions }: Props) {
             messages={messages}
             selfId={selfId}
             otherIds={participants.filter((p) => p.id !== selfId).map((p) => p.id)}
-            participantNames={Object.fromEntries(
-              participants.map((p) => [p.id, p.name]),
-            )}
             seenBy={seenBy}
-            typingParticipants={typingParticipants}
             bottomInset={bottomInset}
           />
         )}

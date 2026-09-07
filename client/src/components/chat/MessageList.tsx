@@ -7,11 +7,8 @@ interface Props {
   messages: PublicMessage[];
   selfId: string | null;
   otherIds: string[];
-  /** participantId → name (for the typing banner). */
-  participantNames: Record<string, string>;
   /** Participant id → last message id they've read (read receipts). */
   seenBy: Record<string, string>;
-  typingParticipants: string[];
   bottomInset: number;
 }
 
@@ -25,7 +22,7 @@ function shouldGroup(prev: PublicMessage | undefined, cur: PublicMessage | undef
   return sameMinute(prev.sentAt, cur.sentAt) || cur.sentAt - prev.sentAt < 3 * 60_000;
 }
 
-export function MessageList({ messages, selfId, otherIds, participantNames, seenBy, typingParticipants, bottomInset }: Props) {
+export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
@@ -122,19 +119,6 @@ export function MessageList({ messages, selfId, otherIds, participantNames, seen
           {messages.length === 0 && (
             <div className="py-4 text-center text-xs text-ink-faint">
               No messages yet. Say hello.
-            </div>
-          )}
-          {typingParticipants.length > 0 && (
-            <div className="flex items-center gap-2 py-1.5">
-              <span className="h-8 w-8 shrink-0" />
-              <span className="flex items-center gap-1.5 text-xs text-ink-faint">
-                <span className="flex items-center gap-0.5">
-                  <span className="cryo-dot" />
-                  <span className="cryo-dot" style={{ animationDelay: "0.15s" }} />
-                  <span className="cryo-dot" style={{ animationDelay: "0.3s" }} />
-                </span>
-                {participantNames[typingParticipants[0]] ?? "Someone"} is typing…
-              </span>
             </div>
           )}
         </div>
