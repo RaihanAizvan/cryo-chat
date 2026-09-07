@@ -23,8 +23,16 @@ export interface ClientToServerEventMap {
   "room:leave": { roomId: string };
   /** Close a room: everyone is kicked and it is destroyed. */
   "room:close": { roomId: string };
+  /** Clear all messages in a room. */
+  "room:clear": { roomId: string };
+  /** Rename any participant in a room. */
+  "room:rename": { roomId: string; participantId: string; name: string };
   /** Send a chat message. clientId lets the sender match their optimistic copy. */
   "message:send": { roomId: string; text: string; clientId?: string };
+  /** Broadcast a typing indicator to other room members. */
+  "message:typing": { roomId: string };
+  /** Mark the last message I've seen (read receipt). */
+  "message:seen": { roomId: string; messageId: string };
   /** Ask the server for current status of a list of rooms (home screen). */
   "room:status": { refs: RoomRef[] };
 }
@@ -47,10 +55,16 @@ export interface ServerToClientEventMap {
   "presence:left": { participantId: string };
   /** A participant renamed their display name. */
   "presence:renamed": { participantId: string; name: string };
+  /** A participant is typing. */
+  "presence:typing": { participantId: string; name: string };
+  /** A participant's read position in the room (read receipts). */
+  "presence:seen": { participantId: string; lastSeenMessageId: string };
   /** Incoming chat message. */
   "message:new": { message: PublicMessage };
   /** Ordered historical messages delivered on join (ephemeral, in-memory). */
   "message:history": { messages: PublicMessage[] };
+  /** All messages in the room have been cleared. */
+  "message:cleared": {};
   /** Room expired while the client was inside it. */
   "room:expired": { roomId: string };
   /** Room was closed (manually) while the client was inside it. */
@@ -117,8 +131,10 @@ export interface Participant {
   color: AvatarColor;
   /** Millisecond timestamp of last join. */
   joinedAt: number;
-  /** Presence flags reserved for future use (typing, E2EE ready, etc). */
+  /** Presence flags reserved for future use (E2EE ready, etc). */
   status: "online";
+  /** Last message this participant has read (read receipt position). */
+  lastSeenMessageId?: string;
 }
 
 export interface PublicMessage {

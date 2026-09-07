@@ -244,6 +244,66 @@ export function attachHandlers(io: Server, socket: Socket): void {
     io.to(membership.room.id).emit("message:new", { message });
   });
 
+  // Typing indicator: relay to other room members (no server storage).
+  socket.on("message:typing", (raw) => {
+    const membership = ROOM_MEMBERSHIP.get(socket);
+    if (!membership) return;
+    const participant = rooms.participantForSocket(membership.room, socket.id);
+    if (!participant) return;
+    socket.to(membership.room.id).emit("presence:typing", {
+      participantId: participant.id,
+      name: participant.name,
+    });
+  });
+
+  // Read receipt: update the participant's read position and notify everyone.
+  socket.on("message:seen", (raw) => {
+    const membership = ROOM_MEMBERSHIP.get(socket);
+    if (!membership) return;
+    const participant = rooms.participantForSocket(membership.room, socket.id);
+    if (!participant) return;
+    const messageId = typeof raw?.messageId === "string" ? raw.messageId : "";
+    if (!messageId) return;
+    rooms.setParticipantLastSeen(membership.room, participant.id, messageId);
+    io.to(membership.room.id).emit("presence:seen", {
+      participantId: participant.id,
+      lastSeenMessageId: messageId,
+    });
+  });
+
+  // Clear all messages in a room.
+  socket.on("room:clear", (raw) => {
+    const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
+    const membership = ROOM_MEMBERSHIP.get(socket);
+    if (!membership || (roomId && membership.room.id !== roomId)) {
+      sendError(socket, { code: "not_in_room", message: "You're not in that room." });
+      return;
+    }
+    rooms.clearMessages(membership.room);
+    const participant = rooms.participantForSocket(membership.room, socket.id);
+    const name = participant?.name ?? "Someone";
+    const system = rooms.addSystemMessage(membership.room, `${name} cleared the chat`);
+    io.to(membership.room.id).emit("message:cleared", {});
+    io.to(membership.room.id).emit("message:new", { message: system });
+  });
+
+  // Rename any participant in a room.
+  socket.on("room:rename", (raw) => {
+    const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
+    const targetId = typeof raw?.participantId === "string" ? raw.participantId : undefined;
+    const newName = typeof raw?.name === "string" ? raw.name.trim() : "";
+    if (!targetId || !newName || newName.length > 24) return;
+    const membership = ROOM_MEMBERSHIP.get(socket);
+    if (!membership || (roomId && membership.room.id !== roomId)) return;
+    const p = rooms.renameParticipantById(membership.room, targetId, newName);
+    if (p) {
+      io.to(membership.room.id).emit("presence:renamed", {
+        participantId: p.id,
+        name: p.name,
+      });
+    }
+  });
+
   socket.on("disconnect", () => {
     const membership = ROOM_MEMBERSHIP.get(socket);
     if (membership) {
@@ -277,10 +337,6 @@ function joinInternal(
 }
 
 function emitJoined(io: Server, socket: Socket, room: rooms.Room): void {
-  // Welcome note the very first time the special space comes to life.
-  if (room.persistent && rooms.getMessages(room).length === 0) {
-    rooms.addSystemMessage(room, "✨ This is your space — it never closes. Pull up a chair.");
-  }
   socket.emit("room:joined", { room: rooms.toPublicRoom(room, socket.id, room.hostParticipantId) });
   socket.emit("message:history", { messages: rooms.getMessages(room) });
   // Notify others + a persistent system pill in their history/feed.
@@ -297,6 +353,23 @@ function emitJoined(io: Server, socket: Socket, room: rooms.Room): void {
         status: "online",
       },
     });
+    // Share this participant's read position with everyone so senders can
+    // show read receipts immediately, and broadcast other positions to us.
+    if (participant.lastSeenMessageId) {
+      io.to(room.id).emit("presence:seen", {
+        participantId: participant.id,
+        lastSeenMessageId: participant.lastSeenMessageId,
+      });
+    }
+    // Also send existing read positions for other participants.
+    for (const [, p] of room.participants) {
+      if (p.id !== participant.id && p.lastSeenMessageId) {
+        socket.emit("presence:seen", {
+          participantId: p.id,
+          lastSeenMessageId: p.lastSeenMessageId,
+        });
+      }
+    }
   }
 }
 

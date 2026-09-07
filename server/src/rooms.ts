@@ -114,7 +114,10 @@ export function deleteRoom(id: string): boolean {
   return rooms.delete(id);
 }
 
-/** Add a participant to a room. Returns false if the room is full. */
+/** Add a participant to a room. Returns null if the room is full.
+ *  If a participant with the same id already exists (e.g. session restart /
+ *  reconnect after grace period), the existing entry is reused and rebound
+ *  to the new socket so messages stay on the correct side. */
 export function addParticipant(
   room: Room,
   socket: Socket,
@@ -122,14 +125,19 @@ export function addParticipant(
   name: string,
   color: number,
 ): Participant | null {
-  if (room.participants.size >= config.maxRoomSize) return null;
-  const participant: Participant = {
-    id: participantId,
-    name,
-    color,
-    joinedAt: Date.now(),
-    status: "online",
-  };
+  if (room.participants.size >= config.maxRoomSize && !room.participants.has(participantId)) {
+    return null;
+  }
+  const existing = room.participants.get(participantId);
+  const participant: Participant = existing
+    ? { ...existing, joinedAt: Date.now(), status: "online" }
+    : {
+        id: participantId,
+        name,
+        color,
+        joinedAt: Date.now(),
+        status: "online",
+      };
   room.participants.set(participantId, participant);
   room.sockets.set(socket.id, participantId);
   if (!room.hostParticipantId) room.hostParticipantId = participantId;
@@ -160,7 +168,7 @@ export function removeParticipant(
   return { participant, empty: room.participants.size === 0 };
 }
 
-/** Rename a participant in a room; returns the updated participant if found. */
+/** Rename a participant in a room by socket id; returns the updated participant if found. */
 export function renameParticipant(
   room: Room,
   socketId: string,
@@ -173,6 +181,18 @@ export function renameParticipant(
   if (!participant) return undefined;
   participant.name = name;
   participant.color = color;
+  return participant;
+}
+
+/** Rename any participant by their id (for room-level renames). */
+export function renameParticipantById(
+  room: Room,
+  participantId: string,
+  name: string,
+): Participant | undefined {
+  const participant = room.participants.get(participantId);
+  if (!participant) return undefined;
+  participant.name = name;
   return participant;
 }
 
@@ -254,6 +274,18 @@ export function getMessages(room: Room): PublicMessage[] {
   return room.messages.map(toPublicMessage);
 }
 
+/** Clear all messages in a room and reset every participant's read position. */
+export function clearMessages(room: Room): void {
+  room.messages.length = 0;
+  for (const p of room.participants.values()) p.lastSeenMessageId = undefined;
+}
+
+/** Update the read position for a participant. */
+export function setParticipantLastSeen(room: Room, participantId: string, messageId: string): void {
+  const p = room.participants.get(participantId);
+  if (p) p.lastSeenMessageId = messageId;
+}
+
 /** Build the public (client-safe) representation of a room from a socket's view. */
 export function toPublicRoom(room: Room, socketId: string, hostParticipantId: string): PublicRoom {
   const pid = room.sockets.get(socketId);
@@ -272,6 +304,7 @@ export function toPublicRoom(room: Room, socketId: string, hostParticipantId: st
       color: p.color,
       joinedAt: p.joinedAt,
       status: p.status,
+      lastSeenMessageId: p.lastSeenMessageId,
     })),
   };
 }
