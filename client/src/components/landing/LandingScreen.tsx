@@ -63,11 +63,11 @@ export function LandingScreen({ state, actions }: Props) {
             />
           </span>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight text-ink">
-          Chat with no trace.
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">
+          Hey, {session.name?.split(" ")[0] ?? "there"}.
         </h1>
-        <p className="mt-2.5 max-w-[17rem] text-[15px] leading-relaxed text-ink-muted">
-          Private rooms, ephemeral by design. Rooms vanish when you leave.
+        <p className="mt-2 max-w-[17rem] text-[15px] leading-relaxed text-ink-muted">
+          Rooms come and go, chats disappear — keep it casual.
         </p>
 
         {/* Explicit connect / status control */}
