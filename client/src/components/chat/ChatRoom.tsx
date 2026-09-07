@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { RoomState, RoomActions } from "../../hooks/useChatRoom";
 import { useSession } from "../../lib/store";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
@@ -16,11 +16,20 @@ const COMPOSER_MIN_HEIGHT = 66;
 
 export function ChatRoom({ state, actions }: Props) {
   const session = useSession();
-  const { room, messages, participants, notice } = state;
+  const { room, messages, participants, notice, typingParticipants, seenBy } = state;
   const { inset } = useKeyboardInset();
   const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
 
   const onHeightChange = useCallback((h: number) => setComposerHeight(h), []);
+
+  // Read receipts: whenever the room's last message changes, tell everyone
+  // how far I've read. This keeps "seen" stable across leave/rejoin — the
+  // server remembers my position per participant.
+  useEffect(() => {
+    if (!room || messages.length === 0) return;
+    actions.sendSeen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room?.id, messages[messages.length - 1]?.id]);
 
   if (!room) return null;
 
@@ -38,9 +47,12 @@ export function ChatRoom({ state, actions }: Props) {
         participants={participants}
         selfId={selfId}
         notice={notice}
+        typing={typingParticipants.length > 0 ? typingParticipants : null}
         onBack={actions.leaveRoom}
         onLeave={actions.leaveRoom}
         onClose={actions.closeRoom}
+        onClearChat={actions.clearChat}
+        onRenameParticipant={actions.renameParticipant}
       />
 
       <div className="flex-1 overflow-hidden">
@@ -55,13 +67,22 @@ export function ChatRoom({ state, actions }: Props) {
           <MessageList
             messages={messages}
             selfId={selfId}
-            hasOthers={participants.some((p) => p.id !== selfId)}
+            otherIds={participants.filter((p) => p.id !== selfId).map((p) => p.id)}
+            participantNames={Object.fromEntries(
+              participants.map((p) => [p.id, p.name]),
+            )}
+            seenBy={seenBy}
+            typingParticipants={typingParticipants}
             bottomInset={bottomInset}
           />
         )}
       </div>
 
-      <MessageComposer onSend={actions.sendMessage} onHeightChange={onHeightChange} />
+      <MessageComposer
+        onSend={actions.sendMessage}
+        onHeightChange={onHeightChange}
+        onTyping={actions.sendTyping}
+      />
     </div>
   );
 }

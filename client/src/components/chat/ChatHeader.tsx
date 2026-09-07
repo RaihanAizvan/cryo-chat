@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
-import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX } from "../ui/Icon";
+import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX, IconEdit, IconTrash } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { roomShareLink } from "./ShareRoom";
@@ -24,9 +24,13 @@ interface Props {
   participants: Participant[];
   selfId: string | null;
   notice: string | null;
+  /** IDs of participants currently typing (persistent room). */
+  typing: string[] | null;
   onBack: () => void;
   onLeave: () => void;
   onClose: () => void;
+  onClearChat: () => void;
+  onRenameParticipant: (participantId: string, name: string) => void;
 }
 
 export function ChatHeader({
@@ -35,13 +39,19 @@ export function ChatHeader({
   participants,
   selfId,
   notice,
+  typing,
   onBack,
   onLeave,
   onClose,
+  onClearChat,
+  onRenameParticipant,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
   const [confirmingClose, setConfirmingClose] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [renaming, setRenaming] = useState<Participant | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   // WhatsApp-style: remember the other person in the special space so the
   // header keeps showing their name and last-seen even after they step out.
@@ -65,10 +75,10 @@ export function ChatHeader({
     if (!room.persistent) return;
     const other = participants.find((p) => p.id !== selfId);
     if (other) {
-      const seen = { name: other.name, color: other.color, lastSeen: Date.now() };
+      const seen = { id: other.id, name: other.name, color: other.color, lastSeen: Date.now() };
       storePeer(room.code, seen);
       setPeer((prev) =>
-        prev && prev.name === seen.name && prev.color === seen.color
+        prev && prev.id === seen.id
           ? { ...prev, lastSeen: seen.lastSeen }
           : seen,
       );
@@ -123,7 +133,16 @@ export function ChatHeader({
                   {peer ? peer.name : "Your space"}
                 </div>
                 <div className="flex items-center gap-1.5 text-[11px]">
-                  {!peer ? (
+                  {typing && typing.length > 0 ? (
+                    <span className="flex items-center gap-1 text-ink-muted">
+                      <span className="flex items-center gap-0.5">
+                        <span className="cryo-dot" />
+                        <span className="cryo-dot" style={{ animationDelay: "0.15s" }} />
+                        <span className="cryo-dot" style={{ animationDelay: "0.3s" }} />
+                      </span>
+                      typing…
+                    </span>
+                  ) : !peer ? (
                     <span className="text-ink-faint">Waiting for someone…</span>
                   ) : otherPresent ? (
                     <>
@@ -219,6 +238,57 @@ export function ChatHeader({
               )}
             </button>
             <div className="my-1 h-px bg-base-border" />
+            {room.persistent && peer && (
+              <button
+                onClick={() => {
+                  const target =
+                    participants.find((p) => p.id === peer.id) ??
+                    participants.find((p) => p.name === peer.name) ??
+                    ({ id: peer.id, name: peer.name, color: peer.color, joinedAt: Date.now(), status: "online" } as Participant);
+                  setRenaming(target);
+                  setRenameValue("");
+                  setMenuOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-base-border"
+              >
+                <IconEdit width={15} height={15} className="text-ink-muted" />
+                Rename {peer.name}
+              </button>
+            )}
+            {confirmingClear ? (
+              <div className="px-3 py-2">
+                <p className="mb-2 text-xs text-ink-muted">
+                  Clear all messages in this room?
+                </p>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => {
+                      onClearChat();
+                      setMenuOpen(false);
+                      setConfirmingClear(false);
+                    }}
+                    className="flex-1 rounded-lg bg-rose-500/15 px-2 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/25"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => setConfirmingClear(false)}
+                    className="flex-1 rounded-lg bg-base-border px-2 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingClear(true)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-base-border"
+              >
+                <IconTrash width={15} height={15} className="text-ink-muted" />
+                Clear chat
+              </button>
+            )}
+            <div className="my-1 h-px bg-base-border" />
             {room.persistent && (
               <>
                 {confirmingClose ? (
@@ -267,6 +337,58 @@ export function ChatHeader({
               Leave room
             </button>
           </div>
+        </>
+      )}
+
+      {/* Rename any participant in this room. */}
+      {renaming && (
+        <>
+          <div
+            className="fixed inset-0 z-30 bg-black/40"
+            onClick={() => setRenaming(null)}
+          />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = renameValue.trim();
+              if (name) {
+                onRenameParticipant(renaming.id, name);
+                setRenaming(null);
+              }
+            }}
+            className="cryo-pop fixed left-1/2 top-1/2 z-40 w-72 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-base-border2 bg-base-raised p-4 shadow-2xl"
+          >
+            <h3 className="mb-1 text-[15px] font-semibold text-ink">
+              Rename participant
+            </h3>
+            <p className="mb-3 text-xs text-ink-muted">
+              {renaming.name} will see this new name everywhere in the room.
+            </p>
+            <input
+              autoFocus
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              maxLength={24}
+              placeholder="New name…"
+              className="w-full rounded-xl border border-base-border2 bg-base px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRenaming(null)}
+                className="flex-1 rounded-xl bg-base-border px-3 py-2 text-sm font-medium text-ink-muted transition-colors hover:bg-base-border2"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!renameValue.trim()}
+                className="flex-1 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white transition-colors disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          </form>
         </>
       )}
     </header>

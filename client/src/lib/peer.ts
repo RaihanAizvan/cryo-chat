@@ -1,4 +1,5 @@
 export interface StoredPeer {
+  id: string;
   name: string;
   color: number;
   lastSeen: number;
@@ -14,7 +15,12 @@ export function getStoredPeer(code: string): StoredPeer | null {
     if (!raw) return null;
     const p = JSON.parse(raw) as Partial<StoredPeer>;
     if (typeof p.name !== "string" || typeof p.lastSeen !== "number") return null;
-    return { name: p.name, color: typeof p.color === "number" ? p.color : 0, lastSeen: p.lastSeen };
+    return {
+      id: typeof p.id === "string" ? p.id : "",
+      name: p.name,
+      color: typeof p.color === "number" ? p.color : 0,
+      lastSeen: p.lastSeen,
+    };
   } catch {
     return null;
   }

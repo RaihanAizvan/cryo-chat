@@ -3,11 +3,15 @@ import type { PublicMessage } from "@cryo/shared";
 import { IconArrowRight } from "../ui/Icon";
 import { sameMinute, formatTime } from "../../lib/format";
 import { MessageBubble } from "./MessageBubble";
-
 interface Props {
   messages: PublicMessage[];
   selfId: string | null;
-  hasOthers: boolean;
+  otherIds: string[];
+  /** participantId → name (for the typing banner). */
+  participantNames: Record<string, string>;
+  /** Participant id → last message id they've read (read receipts). */
+  seenBy: Record<string, string>;
+  typingParticipants: string[];
   bottomInset: number;
 }
 
@@ -21,7 +25,7 @@ function shouldGroup(prev: PublicMessage | undefined, cur: PublicMessage | undef
   return sameMinute(prev.sentAt, cur.sentAt) || cur.sentAt - prev.sentAt < 3 * 60_000;
 }
 
-export function MessageList({ messages, selfId, hasOthers, bottomInset }: Props) {
+export function MessageList({ messages, selfId, otherIds, participantNames, seenBy, typingParticipants, bottomInset }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
@@ -63,6 +67,15 @@ export function MessageList({ messages, selfId, hasOthers, bottomInset }: Props)
             const mine = m.participantId === selfId;
             const prev = messages[i - 1];
             const firstInGroup = !shouldGroup(prev, m);
+            // Read receipt: a participant's read position marks everything up
+            // to and including that message as seen. Seeded from the server
+            // and kept in state via presence:seen, so it survives leave/rejoin.
+            const isRead = mine && otherIds.some((pid) => {
+              const pos = seenBy[pid];
+              if (!pos) return false;
+              const seenMsg = messages.find((x) => x.id === pos);
+              return seenMsg ? seenMsg.sentAt >= m.sentAt : false;
+            });
             // The divider compares against the previous *user* message (not a
             // transient join/left pill), so it shows for the first real message
             // and whenever a gap of ~2 minutes has passed.
@@ -80,7 +93,7 @@ export function MessageList({ messages, selfId, hasOthers, bottomInset }: Props)
 
             if (m.kind === "system") {
               return (
-                <div key={m.id} className="my-2 flex items-center justify-center">
+                <div key={m.clientId || m.id} className="my-2 flex items-center justify-center">
                   <span className="rounded-full border border-base-border2 bg-base-raised px-2.5 py-0.5 text-[10px] font-medium text-ink-faint">
                     {m.text}
                   </span>
@@ -89,7 +102,7 @@ export function MessageList({ messages, selfId, hasOthers, bottomInset }: Props)
             }
 
             return (
-              <Fragment key={m.id}>
+              <Fragment key={m.clientId || m.id}>
                 {showDivider && (
                   <div className="my-2 flex items-center justify-center">
                     <span className="rounded-full border border-base-border2 bg-base-raised px-2.5 py-0.5 text-[10px] font-medium text-ink-faint">
@@ -101,7 +114,7 @@ export function MessageList({ messages, selfId, hasOthers, bottomInset }: Props)
                   message={m}
                   mine={mine}
                   firstInGroup={firstInGroup}
-                  seen={mine && hasOthers}
+                  seen={isRead}
                 />
               </Fragment>
             );
@@ -109,6 +122,19 @@ export function MessageList({ messages, selfId, hasOthers, bottomInset }: Props)
           {messages.length === 0 && (
             <div className="py-4 text-center text-xs text-ink-faint">
               No messages yet. Say hello.
+            </div>
+          )}
+          {typingParticipants.length > 0 && (
+            <div className="flex items-center gap-2 py-1.5">
+              <span className="h-8 w-8 shrink-0" />
+              <span className="flex items-center gap-1.5 text-xs text-ink-faint">
+                <span className="flex items-center gap-0.5">
+                  <span className="cryo-dot" />
+                  <span className="cryo-dot" style={{ animationDelay: "0.15s" }} />
+                  <span className="cryo-dot" style={{ animationDelay: "0.3s" }} />
+                </span>
+                {participantNames[typingParticipants[0]] ?? "Someone"} is typing…
+              </span>
             </div>
           )}
         </div>

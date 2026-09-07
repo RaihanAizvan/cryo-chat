@@ -8,15 +8,22 @@ import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset
 interface Props {
   onSend: (text: string) => void;
   onHeightChange?: (height: number) => void;
+  /** Called (throttled) while the user types, to show the typing indicator. */
+  onTyping?: () => void;
 }
 
-export function MessageComposer({ onSend, onHeightChange }: Props) {
+export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const isCoarse = useCoarsePointer();
   const { inset } = useKeyboardInset();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
+
+  const onChange = (value: string) => {
+    setText(value);
+    if (value && onTyping) onTyping();
+  };
 
   useEffect(() => {
     if (!emojiOpen) return;
@@ -70,6 +77,7 @@ export function MessageComposer({ onSend, onHeightChange }: Props) {
     );
     setText(next);
     recordEmoji(emoji);
+    if (onTyping) onTyping();
     setTimeout(() => {
       const pos = start + emoji.length;
       ta?.focus();
@@ -104,7 +112,7 @@ export function MessageComposer({ onSend, onHeightChange }: Props) {
           ref={taRef}
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               if (!isCoarse) {
