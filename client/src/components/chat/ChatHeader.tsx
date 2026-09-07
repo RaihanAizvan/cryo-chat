@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
 import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { roomShareLink } from "./ShareRoom";
+import { getStoredPeer, storePeer, type StoredPeer } from "../../lib/peer";
 
 function formatLastSeen(ts: number): string {
   const d = new Date(ts);
@@ -46,26 +47,33 @@ export function ChatHeader({
   // header keeps showing their name and last-seen even after they step out.
   // Peer must be state (not a ref) so the header re-renders the moment the
   // other person joins — a ref mutation alone would never repaint the header.
-  const [peer, setPeer] = useState<{
-    name: string;
-    color: number;
-    lastSeen: number;
-  } | null>(null);
-  // Entering a different room must not leak the previous room's peer.
+  // Seeded + persisted to localStorage so "last seen" survives leaving,
+  // rejoining, and page reloads.
+  const initialPeer = useMemo(
+    () => (room.persistent ? getStoredPeer(room.code) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const [peer, setPeer] = useState<StoredPeer | null>(initialPeer);
+  // Entering a different room must not leak the previous room's peer; reload
+  // whatever we remember for the new space.
   useEffect(() => {
-    setPeer(null);
+    setPeer(room.persistent ? getStoredPeer(room.code) : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.id]);
   useEffect(() => {
     if (!room.persistent) return;
     const other = participants.find((p) => p.id !== selfId);
     if (other) {
+      const seen = { name: other.name, color: other.color, lastSeen: Date.now() };
+      storePeer(room.code, seen);
       setPeer((prev) =>
-        prev && prev.name === other.name && prev.color === other.color
-          ? { ...prev, lastSeen: Date.now() }
-          : { name: other.name, color: other.color, lastSeen: Date.now() },
+        prev && prev.name === seen.name && prev.color === seen.color
+          ? { ...prev, lastSeen: seen.lastSeen }
+          : seen,
       );
     }
-  }, [participants, selfId, room.persistent]);
+  }, [participants, selfId, room.persistent, room.code]);
   const otherPresent = participants.some((p) => p.id !== selfId);
 
   const copy = async (kind: "link" | "code") => {
