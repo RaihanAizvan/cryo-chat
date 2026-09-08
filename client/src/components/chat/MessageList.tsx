@@ -112,6 +112,7 @@ export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset }:
                   mine={mine}
                   firstInGroup={firstInGroup}
                   seen={isRead}
+                  sessionId={selfId ?? ""}
                 />
               </Fragment>
             );

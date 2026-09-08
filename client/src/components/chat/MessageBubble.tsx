@@ -4,6 +4,7 @@ import { Avatar } from "../ui/Avatar";
 import { formatTime } from "../../lib/format";
 import { IconCheck, IconClock, IconAlertTriangle, IconDoubleTick } from "../ui/Icon";
 import { isEmojiOnly } from "../../lib/emojiDetect";
+import { MediaMessage } from "./MediaMessage";
 
 interface Props {
   message: PublicMessage;
@@ -11,6 +12,8 @@ interface Props {
   firstInGroup: boolean;
   /** True when a recipient is present in the room, meaning the message was seen. */
   seen?: boolean;
+  /** Viewer's session id, used to fetch attached media. */
+  sessionId: string;
 }
 
 const URL_RE = /(https?:\/\/[^\s<]+)/g;
@@ -77,9 +80,10 @@ function StatusIcon({
   return <IconCheck width={11} height={11} strokeWidth={2.4} className={color} />;
 }
 
-export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
+export function MessageBubble({ message, mine, firstInGroup, seen, sessionId }: Props) {
   const showName = !mine && firstInGroup;
   const emojiOnly = isEmojiOnly(message.text);
+  const hasMedia = Boolean(message.attachment);
   // Pending/failed are set by the sender's optimistic copy; otherwise the
   // message is "sent" until a recipient is present ("seen").
   const status: "pending" | "sent" | "seen" | "failed" =
@@ -90,6 +94,25 @@ export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
         : mine && seen
           ? "seen"
           : "sent";
+
+  const timeAndStatus = (
+    <span
+      className={`flex items-center gap-0.5 whitespace-nowrap text-[9px] leading-none ${
+        mine ? "text-white/60" : "text-ink-faint"
+      }`}
+    >
+      {formatTime(message.sentAt)}
+      {mine && <StatusIcon status={status} tone={mine ? "on-accent" : "plain"} />}
+    </span>
+  );
+
+  // Overlaid on the image itself: always light-on-dark, even for other users.
+  const overlayTimeAndStatus = (
+    <span className="flex items-center gap-0.5 whitespace-nowrap text-[9px] leading-none text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]">
+      {formatTime(message.sentAt)}
+      {mine && <StatusIcon status={status} tone="on-accent" />}
+    </span>
+  );
 
   return (
     <div
@@ -114,46 +137,84 @@ export function MessageBubble({ message, mine, firstInGroup, seen }: Props) {
             {message.name}
           </span>
         )}
-        <div className="cryo-in flex items-end gap-1.5">
-          {emojiOnly ? (
-            <div className="relative pr-0.5">
-              <span className="block whitespace-pre-wrap px-1 text-[2.6rem] leading-[1.15]">
-                {message.text}
-              </span>
-              <span
-                className={`relative -top-1.5 ml-1.5 flex items-center gap-0.5 whitespace-nowrap pb-0.5 text-right text-[9px] leading-none ${
-                  mine ? "text-ink-faint/70" : "text-ink-faint"
-                }`}
-              >
-                {formatTime(message.sentAt)}
-                {mine && <StatusIcon status={status} tone="plain" />}
-              </span>
+
+        {hasMedia ? (
+          <div
+            className={`overflow-hidden rounded-bubble ${
+              mine
+                ? "rounded-br-md bg-accent"
+                : "rounded-bl-md border border-base-border bg-base-raised"
+            }`}
+          >
+            <div className="relative">
+              <MediaMessage
+                attachment={message.attachment!}
+                sessionId={sessionId}
+              />
+              {!message.text && (
+                <span className="absolute inset-x-0 bottom-0 flex items-end justify-end gap-0.5 bg-gradient-to-t from-black/45 to-transparent px-2 pb-1.5 pt-4">
+                  {overlayTimeAndStatus}
+                </span>
+              )}
             </div>
-          ) : (
-            <div
-              className={`whitespace-pre-wrap [overflow-wrap:anywhere] px-3.5 py-2 pb-1.5 text-[15px] leading-relaxed ${
-                mine
-                  ? "rounded-bubble rounded-br-md bg-accent text-white"
-                  : "rounded-bubble rounded-bl-md border border-base-border bg-base-raised text-ink"
-              }`}
-            >
-              {renderText(message.text)}
-              <span
-                className={`ml-1.5 flex items-center justify-end gap-0.5 whitespace-nowrap pt-1 text-right text-[9px] leading-none ${
-                  mine ? "text-white/60" : "text-ink-faint"
+            {message.text && (
+              <div
+                className={`whitespace-pre-wrap [overflow-wrap:anywhere] px-3.5 pb-1.5 pt-1.5 text-[15px] leading-relaxed ${
+                  mine ? "text-white" : "text-ink"
                 }`}
               >
-                {formatTime(message.sentAt)}
-                {mine && (
-                  <StatusIcon
-                    status={status}
-                    tone={mine ? "on-accent" : "plain"}
-                  />
+                {emojiOnly ? (
+                  <span className="inline-block break-all text-[2.6rem] leading-[1.15]">
+                    {message.text}
+                  </span>
+                ) : (
+                  renderText(message.text)
                 )}
-              </span>
-            </div>
-          )}
-        </div>
+                <span
+                  className={`ml-1.5 inline-flex translate-y-[3px] align-bottom ${
+                    mine ? "text-white/60" : "text-ink-faint"
+                  }`}
+                >
+                  {timeAndStatus}
+                </span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="cryo-in flex items-end gap-1.5">
+            {emojiOnly ? (
+              <div className="relative pr-0.5">
+                <span className="block whitespace-pre-wrap px-1 text-[2.6rem] leading-[1.15]">
+                  {message.text}
+                </span>
+                <span
+                  className={`relative -top-1.5 ml-1.5 flex items-center gap-0.5 whitespace-nowrap pb-0.5 text-right text-[9px] leading-none ${
+                    mine ? "text-ink-faint/70" : "text-ink-faint"
+                  }`}
+                >
+                  {timeAndStatus}
+                </span>
+              </div>
+            ) : (
+              <div
+                className={`whitespace-pre-wrap [overflow-wrap:anywhere] px-3.5 py-2 pb-1.5 text-[15px] leading-relaxed ${
+                  mine
+                    ? "rounded-bubble rounded-br-md bg-accent text-white"
+                    : "rounded-bubble rounded-bl-md border border-base-border bg-base-raised text-ink"
+                }`}
+              >
+                {renderText(message.text)}
+                <span
+                  className={`ml-1.5 flex items-center justify-end gap-0.5 whitespace-nowrap pt-1 text-right text-[9px] leading-none ${
+                    mine ? "text-white/60" : "text-ink-faint"
+                  }`}
+                >
+                  {timeAndStatus}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
