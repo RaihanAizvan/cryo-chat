@@ -261,15 +261,13 @@ export function MessageBubble({
         mine ? "justify-end" : "justify-start"
       }`}
     >
-      {/* Hover reply button (desktop) — fades in beside the bubble. */}
+      {/* Hover reply button (desktop) — fades in beside the bubble, right side. */}
       {replyEnabled && (
         <button
           type="button"
           onClick={() => onReply?.(message)}
           aria-label="Reply"
-          className={`cryo-pop absolute top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-base-border2 bg-base-raised p-1.5 text-ink-muted opacity-0 shadow-md transition-opacity hover:text-accent group-hover:opacity-100 ${
-            mine ? "right-0.5" : "left-0.5"
-          }`}
+          className="absolute right-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-base-border2 bg-base-raised p-1.5 text-ink-muted opacity-0 shadow-md transition-opacity hover:text-accent group-hover:opacity-100"
         >
           <IconReply width={14} height={14} />
         </button>
