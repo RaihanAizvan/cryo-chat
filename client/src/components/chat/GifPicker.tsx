@@ -9,33 +9,50 @@ interface Props {
   onClose: () => void;
 }
 
-/** Tenor result entries we map over (see tenor.com/v2/search). */
-interface TenorResult {
+/** One entry of Giphy's `data` array (see api.giphy.com/v1/gifs/search). */
+interface GiphyResult {
   id: string;
   title?: string;
-  media_formats: Record<
+  images: Record<
     string,
-    { url?: string; dimensions?: [number, number]; size?: number }
+    { url?: string; width?: string; height?: string; size?: string }
   >;
 }
 
-const TENOR_KEY = import.meta.env.VITE_TENOR_API_KEY?.trim() ?? "";
+const GIPHY_KEY = import.meta.env.VITE_GIPHY_API_KEY?.trim() ?? "";
+
+/** Pick a small animated preview and a full-quality version for uploading. */
+function toGifEntry(r: GiphyResult): { id: string; title?: string; preview: string; full: string } {
+  const preview =
+    r.images["fixed_width_small"]?.url ??
+    r.images["fixed_height_small"]?.url ??
+    r.images["preview_gif"]?.url ??
+    r.images["original"]?.url ??
+    "";
+  // `downsized` is capped at ~8 MB, matching our upload limit.
+  const full =
+    r.images["downsized"]?.url ??
+    r.images["fixed_width"]?.url ??
+    r.images["original"]?.url ??
+    preview;
+  return { id: r.id, title: r.title, preview, full };
+}
 
 /**
- * GIF picker. With `VITE_TENOR_API_KEY` configured it shows a searchable Tenor
+ * GIF picker. With `VITE_GIPHY_API_KEY` configured it shows a searchable Giphy
  * grid (trending until you type). Without it the panel still supports uploading
  * your own .gif files. Picked gifs are fetched client-side and funneled into
  * the same upload path as photos, so they stay ephemeral like everything else.
  */
 export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<TenorResult[]>([]);
+  const [results, setResults] = useState<ReturnType<typeof toGifEntry>[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const seq = useRef(0);
 
-  const searchEnabled = TENOR_KEY.length > 0;
+  const searchEnabled = GIPHY_KEY.length > 0;
 
   useEffect(() => {
     if (!searchEnabled) return;
@@ -45,13 +62,12 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
     setError("");
     const url = new URL(
       q
-        ? "https://tenor.com/v2/search"
-        : "https://tenor.com/v2/trending",
+        ? "https://api.giphy.com/v1/gifs/search"
+        : "https://api.giphy.com/v1/gifs/trending",
     );
-    url.searchParams.set("key", TENOR_KEY);
-    url.searchParams.set("limit", "30");
-    url.searchParams.set("media_filter", "minimal");
-    url.searchParams.set("contentfilter", "moderate");
+    url.searchParams.set("api_key", GIPHY_KEY);
+    url.searchParams.set("limit", "28");
+    url.searchParams.set("rating", "g");
     if (q) url.searchParams.set("q", q);
 
     let cancelled = false;
@@ -59,9 +75,9 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
       try {
         const res = await fetch(url.toString());
         if (!res.ok) throw new Error("bad");
-        const data = (await res.json()) as { results?: TenorResult[] };
+        const data = (await res.json()) as { data?: GiphyResult[] };
         if (mySeq === seq.current && !cancelled) {
-          setResults(data.results ?? []);
+          setResults((data.data ?? []).map(toGifEntry));
         }
       } catch {
         if (mySeq === seq.current && !cancelled) {
@@ -88,13 +104,11 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const pick = async (r: TenorResult) => {
-    if (busyId) return;
-    const gif = r.media_formats["gif"] ?? r.media_formats["tinygif"];
-    if (!gif?.url) return;
+  const pick = async (r: ReturnType<typeof toGifEntry>) => {
+    if (busyId || !r.full) return;
     setBusyId(r.id);
     try {
-      const res = await fetch(gif.url);
+      const res = await fetch(r.full);
       if (!res.ok) throw new Error("fetch");
       const blob = await res.blob();
       onPickGif(new File([blob], "gif.gif", { type: "image/gif" }));
@@ -142,42 +156,36 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
           <div className="mt-2.5 max-h-64 overflow-y-auto pr-0.5">
             {searchEnabled && results.length > 0 && (
               <div className="grid grid-cols-3 gap-1.5">
-                {results.map((r) => {
-                  const src =
-                    r.media_formats["tinygif"]?.url ??
-                    r.media_formats["gif"]?.url;
-                  if (!src) return null;
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => void pick(r)}
-                      disabled={busyId !== null}
-                      aria-label={r.title ?? "Choose GIF"}
-                      className="group relative aspect-video overflow-hidden rounded-lg bg-base-border"
-                    >
-                      <img
-                        src={src}
-                        alt={r.title ?? ""}
-                        loading="lazy"
-                        className={`h-full w-full object-cover transition-opacity ${
-                          busyId === r.id ? "opacity-40" : "group-hover:opacity-80"
-                        }`}
-                      />
-                      {busyId === r.id && (
-                        <span className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-muted">
-                          …
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                {results.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => void pick(r)}
+                    disabled={busyId !== null}
+                    aria-label={r.title ?? "Choose GIF"}
+                    className="group relative aspect-video overflow-hidden rounded-lg bg-base-border"
+                  >
+                    <img
+                      src={r.preview}
+                      alt={r.title ?? ""}
+                      loading="lazy"
+                      className={`h-full w-full object-cover transition-opacity ${
+                        busyId === r.id ? "opacity-40" : "group-hover:opacity-80"
+                      }`}
+                    />
+                    {busyId === r.id && (
+                      <span className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-muted">
+                        …
+                      </span>
+                    )}
+                  </button>
+                ))}
               </div>
             )}
 
             {!searchEnabled && (
               <p className="mb-2 text-left text-[11px] leading-relaxed text-ink-faint">
-                Set <code className="rounded bg-base-border px-1">VITE_TENOR_API_KEY</code>{" "}
+                Set <code className="rounded bg-base-border px-1">VITE_GIPHY_API_KEY</code>{" "}
                 to search GIFs. You can still upload your own.
               </p>
             )}
