@@ -8,11 +8,12 @@
  */
 
 import type { Server, Socket } from "socket.io";
-import type { ErrorPayload, RoomRef } from "@cryo/shared";
+import type { ErrorPayload, MessageAttachment, RoomRef } from "@cryo/shared";
 import { config } from "./config.js";
 import { getSession, updateName } from "./sessions.js";
 import * as rooms from "./rooms.js";
-import { normalizeMessage, RateLimiter } from "./validation.js";
+import * as media from "./media.js";
+import { normalizeMessage, normalizeCaption, RateLimiter } from "./validation.js";
 import { normalizeCode } from "./util.js";
 
 const messageLimiter = new RateLimiter(
@@ -217,12 +218,39 @@ export function attachHandlers(io: Server, socket: Socket): void {
       sendError(socket, { code: "not_in_room", message: "Join a room first." });
       return;
     }
-    const text = normalizeMessage(raw?.text);
     const clientId =
       typeof raw?.clientId === "string" && raw.clientId.length <= 64
         ? raw.clientId
         : undefined;
-    if (!text) {
+
+    // Media messages: the reference must come from this session's own upload.
+    const mediaId =
+      typeof raw?.attachment?.mediaId === "string" ? raw.attachment.mediaId : "";
+    let attachment: MessageAttachment | undefined;
+    if (mediaId) {
+      const m = media.getMedia(mediaId);
+      if (!m || m.uploadedBy !== getSession(socket).id) {
+        sendError(socket, {
+          code: "message_invalid",
+          message: "Unknown media attachment.",
+          clientId,
+        });
+        return;
+      }
+      attachment = {
+        type: m.kind,
+        mediaId: m.id,
+        viewOnce: m.viewOnce,
+        width: m.width,
+        height: m.height,
+        name: m.name,
+      };
+    }
+
+    const text =
+      normalizeMessage(raw?.text) ?? (attachment ? normalizeCaption(raw?.text) : "");
+
+    if (!text && !attachment) {
       sendError(socket, {
         code: "message_invalid",
         message: "Message rejected.",
@@ -240,7 +268,13 @@ export function attachHandlers(io: Server, socket: Socket): void {
     }
     const participant = rooms.participantForSocket(membership.room, socket.id);
     if (!participant) return;
-    const message = rooms.addMessage(membership.room, participant, text, clientId);
+    const message = rooms.addMessage(
+      membership.room,
+      participant,
+      text,
+      clientId,
+      attachment,
+    );
     io.to(membership.room.id).emit("message:new", { message });
   });
 
@@ -403,6 +437,7 @@ function closeRoom(io: Server, room: rooms.Room): void {
 export function startSweeper(io: Server): NodeJS.Timeout {
   const interval = setInterval(() => {
     messageLimiter.sweep();
+    media.pruneMedia();
     for (const room of rooms.allRooms()) {
       if (rooms.isExpired(room)) {
         io.to(room.id).emit("room:expired", { roomId: room.id });

@@ -16,6 +16,21 @@ export function normalizeMessage(raw: unknown): string | null {
   return text;
 }
 
+/**
+ * Normalize an optional caption for a media message. Unlike `normalizeMessage`
+ * an empty caption is valid (photo/gif with no caption); overly long captions
+ * are clamped rather than rejected.
+ */
+export function normalizeCaption(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (text.trim().length === 0) return "";
+  // Reject control characters (but allow newline and tab).
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return "";
+  if (text.length > MAX_MESSAGE_LENGTH) return text.slice(0, MAX_MESSAGE_LENGTH);
+  return text.trim();
+}
+
 interface Bucket {
   count: number;
   resetAt: number;

@@ -4,6 +4,7 @@ import type {
   PublicRoom,
   Participant,
   ErrorPayload,
+  MessageAttachment,
 } from "@cryo/shared";
 import { connectAndInit, socket, useSession, wasRecentlyReconnected, lastDisconnectAt } from "../lib/store";
 import { genClientId } from "../lib/ids";
@@ -34,7 +35,7 @@ export interface RoomActions {
   joinRoom: (codeOrId: string) => void;
   leaveRoom: () => void;
   closeRoom: () => void;
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string, attachment?: MessageAttachment) => void;
   sendTyping: () => void;
   sendSeen: () => void;
   clearChat: () => void;
@@ -378,10 +379,10 @@ export function useChatRoom(): [RoomState, RoomActions] {
   }, []);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, attachment?: MessageAttachment) => {
       const r = roomRef.current;
       const trimmed = text.trim();
-      if (!r || !trimmed) return;
+      if (!r || (!trimmed && !attachment)) return;
       const clientId = genClientId();
       // Optimistic append (WhatsApp-style): show the bubble instantly with a
       // clock, then flip to a tick once the server echoes it (message:new).
@@ -396,13 +397,19 @@ export function useChatRoom(): [RoomState, RoomActions] {
         kind: "user",
         clientId,
         status: "pending",
+        attachment,
       };
       setMessages((prev) => {
         const next = [...prev, optimistic];
         messagesRef.current = next;
         return next;
       });
-      socket.emit("message:send", { roomId: r.id, text: trimmed, clientId });
+      socket.emit("message:send", {
+        roomId: r.id,
+        text: trimmed,
+        clientId,
+        attachment: attachment ? { mediaId: attachment.mediaId } : undefined,
+      });
     },
     [session],
   );

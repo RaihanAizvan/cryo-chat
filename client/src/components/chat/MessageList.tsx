@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useEffect, useRef, useState } from "react";
 import type { PublicMessage } from "@cryo/shared";
 import { IconArrowRight } from "../ui/Icon";
 import { sameMinute, formatTime } from "../../lib/format";
@@ -35,6 +35,21 @@ export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset }:
     if (!el) return;
     if (stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages, bottomInset]);
+
+  // Images/gifs load asynchronously and grow the list after a message appends,
+  // so the layout-effect above can leave them cut off. Watching the content
+  // box keeps us pinned as media finishes decoding.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const content = el.firstElementChild;
+    if (!content) return;
+    const ro = new ResizeObserver(() => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -112,6 +127,7 @@ export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset }:
                   mine={mine}
                   firstInGroup={firstInGroup}
                   seen={isRead}
+                  sessionId={selfId ?? ""}
                 />
               </Fragment>
             );

@@ -139,3 +139,50 @@ export const IconEmoji = (p: P) => (
     <line x1="15" y1="9" x2="15.01" y2="9" />
   </svg>
 );
+
+export const IconImage = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="9" cy="9" r="2" />
+    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+  </svg>
+);
+
+/** A sticker: rounded square sheet with a little face, like WhatsApp shares. */
+export const IconSticker = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
+    <path d="M14 3v4a2 2 0 0 0 2 2h4" />
+    <path d="M8 13h.01" />
+    <path d="M16 13h.01" />
+    <path d="M10 16c.5.5 1.5 1 3 1s2.5-.5 3-1" />
+  </svg>
+);
+
+export const IconDownload = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+);
+
+export const IconEye = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+export const IconSearch = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.3-4.3" />
+  </svg>
+);
+
+export const IconPlayFilled = (p: P) => (
+  <svg {...base} {...p} fill="currentColor" stroke="none">
+    <path d="m8 5 14 7-14 7Z" />
+  </svg>
+);
