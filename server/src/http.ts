@@ -70,10 +70,12 @@ export function createHttpApp(): express.Express {
       }
       const viewOnce = req.headers["x-view-once"] === "1" || req.headers["x-view-once"] === "true";
       const name = req.headers["x-media-name"];
+      const kindHeader = req.headers["x-media-kind"];
 
       const stored = storeMedia(bytes, mime, sessionId, {
         viewOnce,
         name: typeof name === "string" ? name : undefined,
+        kind: kindHeader === "sticker" ? "sticker" : undefined,
       });
       if (!stored) {
         // Distinguish "rejected payload" from "at capacity" without leaking.

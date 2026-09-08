@@ -10,7 +10,7 @@
 
 export interface UploadResult {
   mediaId: string;
-  type: "image" | "gif";
+  type: "image" | "gif" | "sticker";
   width?: number;
   height?: number;
   name?: string;
@@ -28,7 +28,7 @@ const fetchBase = serverUrl ? serverUrl : "";
  */
 export async function uploadMedia(
   file: File | Blob,
-  options: { viewOnce?: boolean; name?: string } = {},
+  options: { viewOnce?: boolean; name?: string; sticker?: boolean } = {},
 ): Promise<UploadResult> {
   const headers: Record<string, string> = {
     "X-Session-Id": getStoredSessionId() ?? "",
@@ -36,6 +36,7 @@ export async function uploadMedia(
   };
   if (options.viewOnce) headers["X-View-Once"] = "1";
   if (options.name) headers["X-Media-Name"] = options.name;
+  if (options.sticker) headers["X-Media-Kind"] = "sticker";
 
   const res = await fetch(`${fetchBase}/api/media`, {
     method: "POST",

@@ -144,6 +144,22 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
     clearPending();
   };
 
+  /** Send a sticker immediately (WhatsApp-style, no caption step). */
+  const sendSticker = async (file: File) => {
+    try {
+      const up = await uploadMedia(file, { name: "sticker", sticker: true });
+      onSend("", {
+        type: "sticker",
+        mediaId: up.mediaId,
+        width: up.width,
+        height: up.height,
+        name: "Sticker",
+      });
+    } catch {
+      // silent – a failed sticker needs no UI ceremony
+    }
+  };
+
   const clearPending = () => {
     setPending(null);
     setPendingObj((u) => {
@@ -291,6 +307,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
       {!pending && gifOpen && (
         <GifPicker
           onPickGif={(f) => beginPending(f)}
+          onPickSticker={(f) => void sendSticker(f)}
           onPickFile={() => gifInputRef.current?.click()}
           onClose={() => setGifOpen(false)}
         />

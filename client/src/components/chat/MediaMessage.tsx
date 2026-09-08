@@ -44,6 +44,7 @@ function rememberViewed(mediaId: string): void {
 export function MediaMessage({ attachment, sessionId }: Props) {
   const viewOnce = Boolean(attachment.viewOnce);
   const isGif = attachment.type === "gif";
+  const isSticker = attachment.type === "sticker";
   const url = mediaUrl(attachment.mediaId, sessionId);
 
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -80,8 +81,10 @@ export function MediaMessage({ attachment, sessionId }: Props) {
 
   // Let the natural aspect ratio drive the box; only cap width/height. This
   // makes tall (portrait) and wide images both look right (no odd shrinking).
-  const imgStyle: CSSProperties =
-    isGif
+  // Stickers stay small and square like WhatsApp.
+  const imgStyle: CSSProperties = isSticker
+    ? { width: 96, height: 96, maxWidth: 96, maxHeight: 96 }
+    : isGif
       ? { maxWidth: "min(52vw, 190px)", maxHeight: 240, width: "auto", height: "auto" }
       : { maxWidth: "min(70vw, 300px)", maxHeight: 360, width: "auto", height: "auto" };
 
@@ -112,19 +115,21 @@ export function MediaMessage({ attachment, sessionId }: Props) {
         <button
           type="button"
           onClick={openViewer}
-          aria-label={isGif ? "Open GIF" : "Open image"}
+          aria-label={isSticker ? "Open sticker" : isGif ? "Open GIF" : "Open image"}
           className="block cursor-zoom-in"
         >
           <div className="relative">
             <img
               src={url}
-              alt={attachment.name ?? (isGif ? "GIF" : "Image")}
+              alt={attachment.name ?? (isSticker ? "Sticker" : isGif ? "GIF" : "Image")}
               loading="lazy"
               draggable={false}
-              className="block max-w-full select-none rounded-bubble bg-ink-muted/30 object-contain"
+              className={`block max-w-full select-none object-contain ${
+                isSticker ? "rounded-lg" : "rounded-bubble bg-ink-muted/30"
+              }`}
               style={imgStyle}
             />
-            {isGif && (
+            {isGif && !isSticker && (
               <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white/90">
                 GIF
               </span>

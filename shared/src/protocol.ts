@@ -170,10 +170,10 @@ export interface PublicMessage {
   attachment?: MessageAttachment;
 }
 
-/** An uploaded image or gif attached to a chat message. */
+/** An uploaded image/gif/sticker attached to a chat message. */
 export interface MessageAttachment {
-  /** Still image or animated gif. */
-  type: "image" | "gif";
+  /** Still image, animated gif, or square sticker (WhatsApp-style). */
+  type: "image" | "gif" | "sticker";
   /** Server-assigned id used to fetch the media. */
   mediaId: string;
   /** One-time media: bytes are deleted after the first non-uploader view. */

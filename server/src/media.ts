@@ -17,8 +17,8 @@ export interface StoredMedia {
   id: string;
   buffer: Buffer;
   mime: string;
-  /** "image" for stills, "gif" for animated gifs. */
-  kind: "image" | "gif";
+  /** "image" for stills, "gif" for animated gifs, "sticker" for stickers. */
+  kind: "image" | "gif" | "sticker";
   width: number;
   height: number;
   name?: string;
@@ -67,7 +67,7 @@ export function storeMedia(
   buffer: Buffer,
   mime: string,
   uploaderSessionId: string,
-  options: { viewOnce?: boolean; name?: string } = {},
+  options: { viewOnce?: boolean; name?: string; kind?: "sticker" } = {},
 ): Omit<StoredMedia, "buffer"> | null {
   if (buffer.length < MIN_MEDIA_BYTES || buffer.length > MAX_MEDIA_BYTES) return null;
   if (!ACCEPTED_MIME.has(mime)) return null;
@@ -88,7 +88,13 @@ export function storeMedia(
     id,
     buffer,
     mime,
-    kind: mime === "image/gif" ? "gif" : "image",
+    // Stickers are square by intent; otherwise classify from mime.
+    kind:
+      options.kind === "sticker"
+        ? "sticker"
+        : mime === "image/gif"
+          ? "gif"
+          : "image",
     width: dims.width,
     height: dims.height,
     // Strip paths, control chars and clamp length for the stored name.

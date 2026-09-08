@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { IconImage, IconSearch, IconX } from "../ui/Icon";
 
 interface Props {
-  /** Called with a gif's bytes when the user picks one from the grid. */
+  /** Called with a gif/sticker's bytes when the user picks one from the grid. */
   onPickGif: (file: File) => void;
+  /** Stickers send instantly (WhatsApp-style) instead of opening the caption sheet. */
+  onPickSticker: (file: File) => void;
   /** Called when the user chooses to upload their own .gif file. */
   onPickFile: () => void;
   onClose: () => void;
@@ -47,7 +49,7 @@ function toGifEntry(r: GiphyResult): { id: string; title?: string; preview: stri
  * Picked media is fetched client-side and funneled into the same upload path as
  * photos, so it stays ephemeral like everything else.
  */
-export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
+export function GifPicker({ onPickGif, onPickSticker, onPickFile, onClose }: Props) {
   const [mode, setMode] = useState<"gif" | "sticker">("gif");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ReturnType<typeof toGifEntry>[]>([]);
@@ -116,7 +118,12 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
       const res = await fetch(r.full);
       if (!res.ok) throw new Error("fetch");
       const blob = await res.blob();
-      onPickGif(new File([blob], "gif.gif", { type: "image/gif" }));
+      const file = new File([blob], "gif.gif", { type: "image/gif" });
+      if (mode === "sticker") {
+        onPickSticker(file);
+      } else {
+        onPickGif(file);
+      }
     } catch {
       setError("Couldn't download that GIF. Try another.");
     } finally {
@@ -173,15 +180,17 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
 
           <div className="mt-2.5 max-h-64 overflow-y-auto pr-0.5">
             {searchEnabled && results.length > 0 && (
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-4 gap-1.5">
                 {results.map((r) => (
                   <button
                     key={r.id}
                     type="button"
                     onClick={() => void pick(r)}
                     disabled={busyId !== null}
-                    aria-label={r.title ?? "Choose GIF"}
-                    className="group relative aspect-video overflow-hidden rounded-lg bg-base-border"
+                    aria-label={r.title ?? (mode === "sticker" ? "Choose sticker" : "Choose GIF")}
+                    className={`group relative overflow-hidden rounded-lg bg-base-border ${
+                      mode === "sticker" ? "aspect-square" : "aspect-video"
+                    }`}
                   >
                     <img
                       src={r.preview}

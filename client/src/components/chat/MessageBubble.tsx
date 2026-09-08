@@ -141,8 +141,10 @@ export function MessageBubble({ message, mine, firstInGroup, seen, sessionId }: 
         {hasMedia ? (
           <>
             <div
-              className={`overflow-hidden rounded-bubble ${
-                mine ? "" : "border border-base-border"
+              className={`${
+                message.attachment?.type === "sticker"
+                  ? ""
+                  : `overflow-hidden rounded-bubble ${mine ? "" : "border border-base-border"}`
               }`}
             >
               <div className="relative">
