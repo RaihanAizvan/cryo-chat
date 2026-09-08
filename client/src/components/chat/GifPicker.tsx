@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { IconImage, IconSearch, IconX } from "../ui/Icon";
+import { IconImage, IconSearch, IconSticker, IconX } from "../ui/Icon";
 
 interface Props {
+  /** Which tab is shown when the panel opens (composer opens on stickers). */
+  initialMode?: "gif" | "sticker";
   /** Called with a gif/sticker's bytes when the user picks one from the grid. */
   onPickGif: (file: File) => void;
   /** Stickers send instantly (WhatsApp-style) instead of opening the caption sheet. */
   onPickSticker: (file: File) => void;
-  /** Called when the user chooses to upload their own .gif file. */
+  /** Sticker tab: user wants to build a sticker from one of their own images. */
+  onPickStickerFromImage: () => void;
+  /** GIF tab: upload the user's own .gif file. */
   onPickFile: () => void;
   onClose: () => void;
 }
@@ -49,8 +53,15 @@ function toGifEntry(r: GiphyResult): { id: string; title?: string; preview: stri
  * Picked media is fetched client-side and funneled into the same upload path as
  * photos, so it stays ephemeral like everything else.
  */
-export function GifPicker({ onPickGif, onPickSticker, onPickFile, onClose }: Props) {
-  const [mode, setMode] = useState<"gif" | "sticker">("gif");
+export function GifPicker({
+  initialMode = "gif",
+  onPickGif,
+  onPickSticker,
+  onPickStickerFromImage,
+  onPickFile,
+  onClose,
+}: Props) {
+  const [mode, setMode] = useState<"gif" | "sticker">(initialMode);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ReturnType<typeof toGifEntry>[]>([]);
   const [loading, setLoading] = useState(false);
@@ -212,8 +223,8 @@ export function GifPicker({ onPickGif, onPickSticker, onPickFile, onClose }: Pro
 
             {!searchEnabled && (
               <p className="mb-2 text-left text-[11px] leading-relaxed text-ink-faint">
-                Set <code className="rounded bg-base-border px-1">VITE_GIPHY_API_KEY</code>{" "}
-                to search GIFs. You can still upload your own.
+                Set <code className="rounded bg-base-border px-1">VITE_GIPHY_API_KEY</code> to
+                search. You can still {mode === "sticker" ? "make your own." : "upload your own."}
               </p>
             )}
 
@@ -231,14 +242,25 @@ export function GifPicker({ onPickGif, onPickSticker, onPickFile, onClose }: Pro
               </p>
             )}
 
-            <button
-              type="button"
-              onClick={onPickFile}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
-            >
-              <IconImage width={16} height={16} />
-              Upload a GIF
-            </button>
+            {mode === "sticker" ? (
+              <button
+                type="button"
+                onClick={onPickStickerFromImage}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
+              >
+                <IconSticker width={16} height={16} />
+                Make a sticker
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onPickFile}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
+              >
+                <IconImage width={16} height={16} />
+                Upload a GIF
+              </button>
+            )}
           </div>
         </div>
       </div>

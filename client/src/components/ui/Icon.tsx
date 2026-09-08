@@ -148,6 +148,17 @@ export const IconImage = (p: P) => (
   </svg>
 );
 
+/** A sticker: rounded square sheet with a little face, like WhatsApp shares. */
+export const IconSticker = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
+    <path d="M14 3v4a2 2 0 0 0 2 2h4" />
+    <path d="M8 13h.01" />
+    <path d="M16 13h.01" />
+    <path d="M10 16c.5.5 1.5 1 3 1s2.5-.5 3-1" />
+  </svg>
+);
+
 export const IconDownload = (p: P) => (
   <svg {...base} {...p}>
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />

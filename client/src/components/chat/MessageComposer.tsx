@@ -2,11 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { MessageAttachment } from "@cryo/shared";
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
-import { IconEmoji, IconImage, IconSend } from "../ui/Icon";
+import { IconEmoji, IconImage, IconSend, IconSticker } from "../ui/Icon";
 import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
 import { uploadMedia } from "../../lib/api";
+import { makeSticker } from "../../lib/sticker";
 import { recordEmoji } from "../../lib/emoji";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
 
@@ -35,6 +36,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const gifInputRef = useRef<HTMLInputElement>(null);
+  const stickerInputRef = useRef<HTMLInputElement>(null);
 
   const onChange = (value: string) => {
     setText(value);
@@ -160,6 +162,17 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
     }
   };
 
+  /** "Make a sticker": square-crop the picked image, then send it instantly. */
+  const sendStickerFromImage = async (file: File) => {
+    if (!file.type.startsWith("image/")) return;
+    try {
+      const sticker = await makeSticker(file);
+      await sendSticker(sticker);
+    } catch {
+      // silent
+    }
+  };
+
   const clearPending = () => {
     setPending(null);
     setPendingObj((u) => {
@@ -200,29 +213,6 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
     >
       <div className="mx-auto flex max-w-2xl items-end gap-2 px-3 py-2.5">
         <button
-          onClick={() => imageInputRef.current?.click()}
-          aria-label="Attach image"
-          className={sidebarButton}
-        >
-          <IconImage width={21} height={21} />
-        </button>
-
-        <button
-          onClick={() => {
-            setEmojiOpen(false);
-            setGifOpen((v) => !v);
-          }}
-          aria-label={gifOpen ? "Close GIF picker" : "Open GIF picker"}
-          className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold tracking-tight transition-colors ${
-            gifOpen
-              ? "bg-base-border text-accent"
-              : "text-ink-muted hover:bg-base-raised active:bg-base-border"
-          }`}
-        >
-          <span className="-mt-px">GIF</span>
-        </button>
-
-        <button
           onClick={() => {
             setGifOpen(false);
             setEmojiOpen((v) => !v);
@@ -261,6 +251,29 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         />
 
         <button
+          onClick={() => imageInputRef.current?.click()}
+          aria-label="Attach image"
+          className={sidebarButton}
+        >
+          <IconImage width={21} height={21} />
+        </button>
+
+        <button
+          onClick={() => {
+            setEmojiOpen(false);
+            setGifOpen((v) => !v);
+          }}
+          aria-label={gifOpen ? "Close sticker picker" : "Open sticker picker"}
+          className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
+            gifOpen
+              ? "bg-base-border text-accent"
+              : "text-ink-muted hover:bg-base-raised active:bg-base-border"
+          }`}
+        >
+          <IconSticker width={21} height={21} />
+        </button>
+
+        <button
           onClick={submit}
           disabled={!text.trim()}
           aria-label="Send message"
@@ -270,6 +283,18 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         </button>
       </div>
 
+      <input
+        ref={stickerInputRef}
+        type="file"
+        accept="image/*"
+        multiple={false}
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) void sendStickerFromImage(f);
+        }}
+      />
       <input
         ref={imageInputRef}
         type="file"
@@ -306,8 +331,13 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
 
       {!pending && gifOpen && (
         <GifPicker
+          initialMode="sticker"
           onPickGif={(f) => beginPending(f)}
           onPickSticker={(f) => void sendSticker(f)}
+          onPickStickerFromImage={() => {
+            setGifOpen(false);
+            setTimeout(() => stickerInputRef.current?.click(), 0);
+          }}
           onPickFile={() => gifInputRef.current?.click()}
           onClose={() => setGifOpen(false)}
         />
