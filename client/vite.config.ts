@@ -14,6 +14,10 @@ export default defineConfig({
       "/health": {
         target: "http://localhost:4000",
       },
+      // Media uploads/fetches go to the backend over plain HTTP.
+      "/api": {
+        target: "http://localhost:4000",
+      },
     },
   },
   build: {
