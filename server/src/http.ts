@@ -20,6 +20,11 @@ const uploadLimits = new Map<string, { count: number; resetAt: number }>();
 const UPLOAD_WINDOW_MS = 60_000;
 const UPLOAD_MAX_PER_WINDOW = 20;
 
+/** Per-IP Giphy search limiter (the proxy now hides the key, so guard it). */
+const giphyLimits = new Map<string, { count: number; resetAt: number }>();
+const GIPHY_WINDOW_MS = 60_000;
+const GIPHY_MAX_PER_WINDOW = 60;
+
 function allowUpload(ip: string): boolean {
   const now = Date.now();
   const bucket = uploadLimits.get(ip);
@@ -30,6 +35,47 @@ function allowUpload(ip: string): boolean {
   if (bucket.count >= UPLOAD_MAX_PER_WINDOW) return false;
   bucket.count += 1;
   return true;
+}
+
+function allowGiphySearch(ip: string): boolean {
+  const now = Date.now();
+  const bucket = giphyLimits.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    giphyLimits.set(ip, { count: 1, resetAt: now + GIPHY_WINDOW_MS });
+    return true;
+  }
+  if (bucket.count >= GIPHY_MAX_PER_WINDOW) return false;
+  bucket.count += 1;
+  return true;
+}
+
+interface GiphyImage {
+  url?: string;
+}
+interface GiphyImageSet {
+  fixed_width_small?: GiphyImage;
+  fixed_width?: GiphyImage;
+  fixed_height?: GiphyImage;
+  downsized?: GiphyImage;
+  original?: GiphyImage;
+}
+interface GiphyResult {
+  id: string;
+  title: string;
+  images?: GiphyImageSet;
+}
+
+/** Compact, client-ready shape: small preview + one full (download) URL. */
+function toGiphyEntry(r: GiphyResult) {
+  const images = r.images;
+  const preview = images?.fixed_width_small?.url ?? "";
+  const full =
+    images?.fixed_width?.url ??
+    images?.fixed_height?.url ??
+    images?.downsized?.url ??
+    images?.original?.url ??
+    preview;
+  return { id: r.id, title: r.title, preview, full };
 }
 
 function headerSessionId(req: express.Request): string {
@@ -120,6 +166,51 @@ export function createHttpApp(): express.Express {
     }
     const consumed = consumeViewOnce(req.params.id, sessionId);
     res.json({ ok: Boolean(consumed) });
+  });
+
+  // GIF / sticker search. The Giphy key lives server-side (Abasthan root env),
+  // so the client needs no build-time VITE_ var and the key stays out of the
+  // bundle. Only result metadata is proxied; actual GIF bytes are fetched by
+  // the client straight from Giphy's public CDN when one is picked.
+  app.get("/api/giphy", async (req, res) => {
+    if (!config.giphyApiKey) {
+      res.status(503).json({ error: "no_giphy_key" });
+      return;
+    }
+    const ip = (req.ip ?? req.socket.remoteAddress) || "unknown";
+    if (!allowGiphySearch(ip)) {
+      res.status(429).json({ error: "too_many_searches" });
+      return;
+    }
+    const kind =
+      req.query.kind === "stickers"
+        ? "stickers"
+        : req.query.kind === "gifs"
+          ? "gifs"
+          : "gifs";
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const endpoint = q ? "search" : "trending";
+    const url = new URL(`https://api.giphy.com/v1/${kind}/${endpoint}`);
+    url.searchParams.set("api_key", config.giphyApiKey);
+    url.searchParams.set("limit", "28");
+    url.searchParams.set("rating", "g");
+    if (q) url.searchParams.set("q", q);
+
+    try {
+      const upstream = await fetch(url.toString(), {
+        signal: AbortSignal.timeout(8000),
+        headers: { accept: "application/json" },
+      });
+      if (!upstream.ok) {
+        res.status(502).json({ error: "giphy_upstream", status: upstream.status });
+        return;
+      }
+      const data = (await upstream.json()) as { data?: GiphyResult[] };
+      const results = (data.data ?? []).map(toGiphyEntry);
+      res.json({ results });
+    } catch {
+      res.status(502).json({ error: "giphy_unreachable" });
+    }
   });
 
   // Production static serving of the built client.

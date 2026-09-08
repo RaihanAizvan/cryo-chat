@@ -1,7 +1,12 @@
 /**
  * Central configuration, loaded from environment with sane defaults.
  * Keep secrets/internals out of the client.
+ *
+ * Loads a root `.env` (if present) so a single repo-root file works for local
+ * dev and matches Abasthan's "env lives at the root" settings model. Real
+ * deployments inject vars into process.env directly; the file is optional.
  */
+import "dotenv/config";
 
 export interface Config {
   port: number;
@@ -28,6 +33,8 @@ export interface Config {
   sweepIntervalMs: number;
   /** If set, serve the built client from this directory (production). */
   clientDist: string | null;
+  /** Giphy API key used for GIF/sticker search (server-side, never exposed). */
+  giphyApiKey: string;
 }
 
 const list = (v: string | undefined): string[] =>
@@ -57,4 +64,5 @@ export const config: Config = {
   reservedRoomCode: process.env.RESERVED_ROOM_CODE ?? "9999",
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 30_000),
   clientDist: process.env.CLIENT_DIST ?? DEFAULT_CLIENT_DIST,
+  giphyApiKey: process.env.GIPHY_API_KEY ?? "",
 };
