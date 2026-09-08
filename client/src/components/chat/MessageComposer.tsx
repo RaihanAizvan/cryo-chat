@@ -7,6 +7,7 @@ import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
 import { uploadMedia } from "../../lib/api";
+import { prepareUpload } from "../../lib/image";
 import { makeSticker } from "../../lib/sticker";
 import { recordEmoji } from "../../lib/emoji";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
@@ -122,12 +123,18 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
     };
   }, [pendingObj]);
 
-  const beginPending = (file: File) => {
+  const beginPending = async (file: File) => {
     if (!IMAGE_TYPES.includes(file.type)) return;
     closeAllPanels();
-    const url = URL.createObjectURL(file);
+    let f = file;
+    try {
+      f = await prepareUpload(file);
+    } catch {
+      // keep the original on decode failure
+    }
+    const url = URL.createObjectURL(f);
     setPendingObj(url);
-    setPending({ file, previewUrl: url });
+    setPending({ file: f, previewUrl: url });
   };
 
   /** Upload the pending file, then send it as a message with a caption. */
@@ -166,7 +173,12 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const sendStickerFromImage = async (file: File) => {
     if (!file.type.startsWith("image/")) return;
     try {
-      const sticker = await makeSticker(file);
+      let sticker = await makeSticker(file);
+      try {
+        sticker = await prepareUpload(sticker);
+      } catch {
+        // keep the makeSticker output if downscaling fails
+      }
       await sendSticker(sticker);
     } catch {
       // silent

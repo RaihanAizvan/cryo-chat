@@ -40,11 +40,16 @@ const ACCEPTED_MIME = new Set([
   "image/gif",
 ]);
 
-export const MAX_MEDIA_BYTES = 8 * 1024 * 1024; // 8 MB
+export const MAX_MEDIA_BYTES = 32 * 1024 * 1024; // 32 MB
 export const MIN_MEDIA_BYTES = 16;
 export const MAX_MEDIA_COUNT = 256;
-/** Rough bound on total buffered bytes to keep the process sane. */
-export const MAX_MEDIA_TOTAL_BYTES = 128 * 1024 * 1024;
+/**
+ * Rough bound on total buffered bytes to keep the process sane. The 32 MB
+ * per-file cap is intentional (host proxies often choke near ~1 MB, so the
+ * client downscales big photos before upload anyway); this total just avoids
+ * unbounded growth, e.g. 8 full-size uploads at once.
+ */
+export const MAX_MEDIA_TOTAL_BYTES = 256 * 1024 * 1024;
 
 /** Newest first eviction when we run out of room — trims nornal media only. */
 function evictOldestNormal(): boolean {
