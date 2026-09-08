@@ -27,8 +27,15 @@ export interface ClientToServerEventMap {
   "room:clear": { roomId: string };
   /** Rename any participant in a room. */
   "room:rename": { roomId: string; participantId: string; name: string };
-  /** Send a chat message. clientId lets the sender match their optimistic copy. */
-  "message:send": { roomId: string; text: string; clientId?: string };
+  /** Send a chat message. clientId lets the sender match their optimistic copy.
+   *  An image/gif message may carry `attachment`; `text` then holds the caption
+   *  (and may be empty). */
+  "message:send": {
+    roomId: string;
+    text: string;
+    clientId?: string;
+    attachment?: { mediaId: string };
+  };
   /** Broadcast a typing indicator to other room members. */
   "message:typing": { roomId: string };
   /** Mark the last message I've seen (read receipt). */
@@ -159,6 +166,23 @@ export interface PublicMessage {
    * server without this field. Not part of the wire protocol for history.
    */
   status?: "pending" | "failed";
+  /** Uploaded image/gif shown with, or instead of, text. */
+  attachment?: MessageAttachment;
+}
+
+/** An uploaded image or gif attached to a chat message. */
+export interface MessageAttachment {
+  /** Still image or animated gif. */
+  type: "image" | "gif";
+  /** Server-assigned id used to fetch the media. */
+  mediaId: string;
+  /** One-time media: bytes are deleted after the first non-uploader view. */
+  viewOnce?: boolean;
+  /** Intrinsic pixel dimensions (client uses them for layout). */
+  width?: number;
+  height?: number;
+  /** Sanitized original file name, if provided at upload. */
+  name?: string;
 }
 
 export type MessageKind = "user" | "system";
