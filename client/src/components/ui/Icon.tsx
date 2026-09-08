@@ -181,6 +181,14 @@ export const IconSearch = (p: P) => (
   </svg>
 );
 
+/** WhatsApp-style "reply" arrow used on hover and in the swipe hint. */
+export const IconReply = (p: P) => (
+  <svg {...base} {...p}>
+    <polyline points="9 17 4 12 9 7" />
+    <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+  </svg>
+);
+
 export const IconPlayFilled = (p: P) => (
   <svg {...base} {...p} fill="currentColor" stroke="none">
     <path d="m8 5 14 7-14 7Z" />

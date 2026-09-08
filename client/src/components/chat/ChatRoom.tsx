@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import type { PublicMessage } from "@cryo/shared";
 import type { RoomState, RoomActions } from "../../hooks/useChatRoom";
 import { useSession } from "../../lib/store";
 import { useKeyboardInset } from "../../hooks/useKeyboardInset";
 import { ChatHeader } from "./ChatHeader";
 import { MessageList } from "./MessageList";
 import { MessageComposer } from "./MessageComposer";
+import type { MessageAttachment } from "@cryo/shared";
 import { ShareRoom } from "./ShareRoom";
 
 interface Props {
@@ -19,8 +21,17 @@ export function ChatRoom({ state, actions }: Props) {
   const { room, messages, participants, notice, typingParticipants, seenBy } = state;
   const { inset } = useKeyboardInset();
   const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
+  const [replyTarget, setReplyTarget] = useState<PublicMessage | null>(null);
 
   const onHeightChange = useCallback((h: number) => setComposerHeight(h), []);
+
+  const onSend = useCallback(
+    (text: string, attachment?: MessageAttachment, replyTo?: PublicMessage) => {
+      actions.sendMessage(text, attachment, replyTo);
+      setReplyTarget(null);
+    },
+    [actions],
+  );
 
   // Read receipts: whenever the room's last message changes, tell everyone
   // how far I've read. This keeps "seen" stable across leave/rejoin — the
@@ -70,14 +81,17 @@ export function ChatRoom({ state, actions }: Props) {
             otherIds={participants.filter((p) => p.id !== selfId).map((p) => p.id)}
             seenBy={seenBy}
             bottomInset={bottomInset}
+            onReply={setReplyTarget}
           />
         )}
       </div>
 
       <MessageComposer
-        onSend={actions.sendMessage}
+        onSend={onSend}
         onHeightChange={onHeightChange}
         onTyping={actions.sendTyping}
+        replyTarget={replyTarget}
+        onCancelReply={() => setReplyTarget(null)}
       />
     </div>
   );

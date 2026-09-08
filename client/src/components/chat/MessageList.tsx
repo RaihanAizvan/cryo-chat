@@ -10,6 +10,8 @@ interface Props {
   /** Participant id → last message id they've read (read receipts). */
   seenBy: Record<string, string>;
   bottomInset: number;
+  /** Called when a message is swiped right (or hover-replied) to start a reply. */
+  onReply?: (message: PublicMessage) => void;
 }
 
 const NEAR_BOTTOM = 48;
@@ -22,7 +24,7 @@ function shouldGroup(prev: PublicMessage | undefined, cur: PublicMessage | undef
   return sameMinute(prev.sentAt, cur.sentAt) || cur.sentAt - prev.sentAt < 3 * 60_000;
 }
 
-export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset }: Props) {
+export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset, onReply }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const [showJump, setShowJump] = useState(false);
@@ -64,6 +66,20 @@ export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset }:
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     stickToBottom.current = true;
     setShowJump(false);
+  };
+
+  /** Scroll a tapped quote's message into view and flash it briefly. */
+  const scrollToMessage = (id: string) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = el.querySelector<HTMLElement>(`[data-message-id="${id}"]`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Restart the flash animation even if the same target was tapped twice.
+    target.classList.remove("cryo-flash");
+    void target.offsetWidth;
+    target.classList.add("cryo-flash");
+    window.setTimeout(() => target.classList.remove("cryo-flash"), 1400);
   };
 
   return (
@@ -128,6 +144,8 @@ export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset }:
                   firstInGroup={firstInGroup}
                   seen={isRead}
                   sessionId={selfId ?? ""}
+                  onReply={onReply}
+                  onQuoteTap={scrollToMessage}
                 />
               </Fragment>
             );

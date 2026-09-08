@@ -9,6 +9,7 @@ import type {
 import { connectAndInit, socket, useSession, wasRecentlyReconnected, lastDisconnectAt } from "../lib/store";
 import { genClientId } from "../lib/ids";
 import { recordRoomHistory, touchRoomHistory } from "../lib/roomHistory";
+import { replySnapshot } from "../lib/reply";
 
 // Slightly above the server's connection-state-recovery window (120s): if the
 // drop lasted longer, the server can't restore us, so re-join explicitly.
@@ -35,7 +36,7 @@ export interface RoomActions {
   joinRoom: (codeOrId: string) => void;
   leaveRoom: () => void;
   closeRoom: () => void;
-  sendMessage: (text: string, attachment?: MessageAttachment) => void;
+  sendMessage: (text: string, attachment?: MessageAttachment, replyTo?: PublicMessage) => void;
   sendTyping: () => void;
   sendSeen: () => void;
   clearChat: () => void;
@@ -379,7 +380,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
   }, []);
 
   const sendMessage = useCallback(
-    (text: string, attachment?: MessageAttachment) => {
+    (text: string, attachment?: MessageAttachment, replyTo?: PublicMessage) => {
       const r = roomRef.current;
       const trimmed = text.trim();
       if (!r || (!trimmed && !attachment)) return;
@@ -398,6 +399,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
         clientId,
         status: "pending",
         attachment,
+        replyTo: replyTo ? replySnapshot(replyTo) : undefined,
       };
       setMessages((prev) => {
         const next = [...prev, optimistic];
@@ -409,6 +411,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
         text: trimmed,
         clientId,
         attachment: attachment ? { mediaId: attachment.mediaId } : undefined,
+        replyTo: replyTo ? { messageId: replyTo.id } : undefined,
       });
     },
     [session],

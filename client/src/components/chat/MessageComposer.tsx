@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
-import type { MessageAttachment } from "@cryo/shared";
+import type { MessageAttachment, PublicMessage } from "@cryo/shared";
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
-import { IconEmoji, IconImage, IconSend, IconSticker } from "../ui/Icon";
+import { IconEmoji, IconImage, IconReply, IconSend, IconSticker, IconX } from "../ui/Icon";
 import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
@@ -12,10 +12,13 @@ import { recordEmoji } from "../../lib/emoji";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
 
 interface Props {
-  onSend: (text: string, attachment?: MessageAttachment) => void;
+  onSend: (text: string, attachment?: MessageAttachment, replyTo?: PublicMessage) => void;
   onHeightChange?: (height: number) => void;
   /** Called (throttled) while the user types, to show the typing indicator. */
   onTyping?: () => void;
+  /** Message being replied to (quote pill above the input). */
+  replyTarget?: PublicMessage | null;
+  onCancelReply?: () => void;
 }
 
 interface PendingMedia {
@@ -25,7 +28,13 @@ interface PendingMedia {
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
-export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
+export function MessageComposer({
+  onSend,
+  onHeightChange,
+  onTyping,
+  replyTarget,
+  onCancelReply,
+}: Props) {
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
@@ -85,7 +94,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onSend(trimmed);
+    onSend(trimmed, undefined, replyTarget ?? undefined);
     setText("");
     taRef.current?.focus();
   };
@@ -211,6 +220,30 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         right: "env(safe-area-inset-right)",
       }}
     >
+      {replyTarget && (
+        <div className="mx-auto max-w-2xl px-3 pt-2">
+          <div className="cryo-in flex items-center gap-2 rounded-2xl border border-base-border2 bg-base-raised px-2.5 py-1.5">
+            <IconReply
+              width={15}
+              height={15}
+              className="shrink-0 -scale-x-100 text-accent"
+            />
+            <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">
+              Replying to{" "}
+              <span className="font-semibold text-ink">{replyTarget.name}</span>
+            </span>
+            <button
+              type="button"
+              onClick={onCancelReply}
+              aria-label="Cancel reply"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-base-border hover:text-ink"
+            >
+              <IconX width={13} height={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto flex max-w-2xl items-end gap-2 px-3 py-2.5">
         <button
           onClick={() => {
