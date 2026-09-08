@@ -41,12 +41,14 @@ function toGifEntry(r: GiphyResult): { id: string; title?: string; preview: stri
 }
 
 /**
- * GIF picker. With `VITE_GIPHY_API_KEY` configured it shows a searchable Giphy
- * grid (trending until you type). Without it the panel still supports uploading
- * your own .gif files. Picked gifs are fetched client-side and funneled into
- * the same upload path as photos, so they stay ephemeral like everything else.
+ * GIF / sticker picker. With `VITE_GIPHY_API_KEY` configured it shows a
+ * searchable Giphy grid (trending until you type) for both animated GIFs and
+ * stickers. Without it the panel still supports uploading your own .gif files.
+ * Picked media is fetched client-side and funneled into the same upload path as
+ * photos, so it stays ephemeral like everything else.
  */
 export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
+  const [mode, setMode] = useState<"gif" | "sticker">("gif");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ReturnType<typeof toGifEntry>[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,10 +64,11 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
     const mySeq = ++seq.current;
     setLoading(true);
     setError("");
+    const kind = mode === "sticker" ? "stickers" : "gifs";
     const url = new URL(
       q
-        ? "https://api.giphy.com/v1/gifs/search"
-        : "https://api.giphy.com/v1/gifs/trending",
+        ? `https://api.giphy.com/v1/${kind}/search`
+        : `https://api.giphy.com/v1/${kind}/trending`,
     );
     url.searchParams.set("api_key", GIPHY_KEY);
     url.searchParams.set("limit", "28");
@@ -96,7 +99,7 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, searchEnabled]);
+  }, [query, searchEnabled, mode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -127,9 +130,22 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
       <div className="absolute inset-x-0 bottom-full z-20 mx-auto max-w-2xl px-2 pb-1">
         <div className="cryo-pop rounded-2xl border border-base-border2 bg-base-raised p-3 shadow-xl">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              GIF
-            </span>
+            <div className="flex shrink-0 rounded-full bg-base-border p-0.5">
+              {(["gif", "sticker"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide transition-colors ${
+                    mode === m
+                      ? "bg-base-raised text-accent shadow-sm"
+                      : "text-ink-faint hover:text-ink-muted"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
             {searchEnabled && (
               <div className="relative min-w-0 flex-1">
                 <IconSearch
@@ -140,7 +156,7 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search GIFs…"
+                  placeholder={`Search ${mode === "sticker" ? "stickers" : "GIFs"}…`}
                   className="w-full rounded-3xl border border-base-border2 bg-base py-1.5 pl-8 pr-3 text-[13px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
                 />
               </div>
@@ -193,7 +209,7 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
             )}
 
             {loading && (
-              <p className="py-4 text-center text-xs text-ink-faint">Loading GIFs…</p>
+              <p className="py-4 text-center text-xs text-ink-faint">Loading…</p>
             )}
             {error && (
               <p className="py-2 text-center text-xs font-medium text-rose-400">
@@ -202,7 +218,7 @@ export function GifPicker({ onPickGif, onPickFile, onClose }: Props) {
             )}
             {searchEnabled && !loading && results.length === 0 && !error && (
               <p className="py-4 text-center text-xs text-ink-faint">
-                No GIFs found.
+                No {mode === "sticker" ? "stickers" : "GIFs"} found.
               </p>
             )}
 

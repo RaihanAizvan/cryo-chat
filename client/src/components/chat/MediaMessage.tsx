@@ -33,10 +33,13 @@ function rememberViewed(mediaId: string): void {
  * Renders a chat attachment (image or gif).
  *
  * - Normal media: tap to open it enlarged in a lightbox, with a save button.
- * - One-time media: a small "One-time" tile. Tapping opens it in the lightbox;
- *   the first successful load consumes the upload server-side, and after the
- *   viewer closes the tile reads "Viewed" and never opens again (bytes are
- *   gone for everyone; a storage flag plus the 404 enforce it locally too).
+ * - One-time media: a small "One-time" tile. Tapping opens the lightbox and
+ *   the first successful view consumes the upload server-side – but the
+ *   lightbox stays open until the user closes it. After that the tile reads
+ *   "Viewed" (Gone for everyone) and never opens again.
+ *
+ * Images size by their natural ratio (max capped) so the outer box hugs any
+ * portrait/landscape aspect instead of shrinking oddly.
  */
 export function MediaMessage({ attachment, sessionId }: Props) {
   const viewOnce = Boolean(attachment.viewOnce);
@@ -56,6 +59,12 @@ export function MediaMessage({ attachment, sessionId }: Props) {
     setConsumed(true);
   }, [attachment.mediaId]);
 
+  const openViewer = useCallback(() => {
+    // A consumed one-time upload is never re-openable.
+    if (viewOnce && consumed) return;
+    setViewerOpen(true);
+  }, [viewOnce, consumed]);
+
   const handleViewerLoaded = useCallback(() => {
     if (!viewOnce) return;
     void markMediaViewed(attachment.mediaId).then((ok) => {
@@ -69,85 +78,73 @@ export function MediaMessage({ attachment, sessionId }: Props) {
     if (viewOnce) consume();
   }, [viewOnce, consume]);
 
-  // Shared media sizing: gifs render smaller, stills a bit larger.
-  const imgStyle: CSSProperties = isGif
-    ? { width: "min(52vw, 190px)", maxHeight: 240, aspectRatio: dimsAspect(attachment) }
-    : { width: "min(70vw, 300px)", maxHeight: 320, aspectRatio: dimsAspect(attachment) };
-
-  if (viewOnce && !consumed) {
-    return (
-      <>
-        <button
-          type="button"
-          onClick={() => setViewerOpen(true)}
-          aria-label="Open one-time image"
-          className="group flex cursor-zoom-in flex-col items-center gap-1 rounded-bubble border border-base-border bg-ink-muted/30 px-6 py-4 text-center transition-colors hover:bg-ink-muted/40"
-        >
-          <IconEye width={22} height={22} className="text-ink-faint transition-opacity group-hover:opacity-70" />
-          <span className="text-xs font-semibold text-ink-muted">One-time</span>
-          <span className="text-[10px] text-ink-faint/80">Tap to open</span>
-        </button>
-        {viewerOpen && (
-          <MediaViewer
-            src={url}
-            onClose={() => setViewerOpen(false)}
-            viewOnce
-            onLoaded={handleViewerLoaded}
-            onLoadError={handleViewerError}
-          />
-        )}
-      </>
-    );
-  }
-
-  if (viewOnce) {
-    return (
-      <div className="flex flex-col items-center gap-1 rounded-bubble border border-base-border bg-ink-muted/30 px-6 py-4 text-center">
-        <IconEye width={20} height={20} className="text-ink-faint" />
-        <span className="text-xs font-semibold text-ink-muted">Viewed</span>
-        <span className="text-[10px] text-ink-faint/80">Gone for everyone</span>
-      </div>
-    );
-  }
+  // Let the natural aspect ratio drive the box; only cap width/height. This
+  // makes tall (portrait) and wide images both look right (no odd shrinking).
+  const imgStyle: CSSProperties =
+    isGif
+      ? { maxWidth: "min(52vw, 190px)", maxHeight: 240, width: "auto", height: "auto" }
+      : { maxWidth: "min(70vw, 300px)", maxHeight: 360, width: "auto", height: "auto" };
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setViewerOpen(true)}
-        aria-label={isGif ? "Open GIF" : "Open image"}
-        className="block cursor-zoom-in"
-      >
-        <div className="relative">
-          <img
-            src={url}
-            alt={attachment.name ?? (isGif ? "GIF" : "Image")}
-            loading="lazy"
-            draggable={false}
-            className="block max-w-full select-none rounded-bubble bg-ink-muted/30"
-            style={imgStyle}
-          />
-          {isGif && (
-            <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white/90">
-              GIF
+      {viewOnce ? (
+        consumed ? (
+          <div className="flex flex-col items-center gap-1 rounded-bubble border border-base-border bg-ink-muted/30 px-6 py-4 text-center">
+            <IconEye width={20} height={20} className="text-ink-faint" />
+            <span className="text-xs font-semibold text-ink-muted">Viewed</span>
+            <span className="text-[10px] text-ink-faint/80">
+              Gone for everyone
             </span>
-          )}
-        </div>
-      </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={openViewer}
+            aria-label="Open one-time image"
+            className="group flex cursor-zoom-in flex-col items-center gap-1 rounded-bubble border border-base-border bg-ink-muted/30 px-6 py-4 text-center transition-colors hover:bg-ink-muted/40"
+          >
+            <IconEye width={22} height={22} className="text-ink-faint transition-opacity group-hover:opacity-70" />
+            <span className="text-xs font-semibold text-ink-muted">One-time</span>
+            <span className="text-[10px] text-ink-faint/80">Tap to open</span>
+          </button>
+        )
+      ) : (
+        <button
+          type="button"
+          onClick={openViewer}
+          aria-label={isGif ? "Open GIF" : "Open image"}
+          className="block cursor-zoom-in"
+        >
+          <div className="relative">
+            <img
+              src={url}
+              alt={attachment.name ?? (isGif ? "GIF" : "Image")}
+              loading="lazy"
+              draggable={false}
+              className="block max-w-full select-none rounded-bubble bg-ink-muted/30 object-contain"
+              style={imgStyle}
+            />
+            {isGif && (
+              <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white/90">
+                GIF
+              </span>
+            )}
+          </div>
+        </button>
+      )}
+
+      {/* The lightbox renders independently of the bubble state, so consuming
+          a one-time upload never closes it before the user does. */}
       {viewerOpen && (
         <MediaViewer
           src={url}
           onClose={() => setViewerOpen(false)}
+          viewOnce={viewOnce}
+          onLoaded={viewOnce ? handleViewerLoaded : undefined}
+          onLoadError={viewOnce ? handleViewerError : undefined}
           fileName={attachment.name}
         />
       )}
     </>
   );
-}
-
-function dimsAspect(attachment: MessageAttachment): string | undefined {
-  if (attachment.width && attachment.height) {
-    return `${attachment.width} / ${attachment.height}`;
-  }
-  return undefined;
 }
