@@ -56,15 +56,22 @@ export function mediaUrl(mediaId: string, sessionId: string): string {
 
 /**
  * Confirm the viewer opened a view-once upload so the server drops the bytes.
- * Best-effort: a failure just leaves the bytes in place.
+ * Returns true when the upload was actually consumed (non-uploader first view);
+ * false for the uploader themselves or when the request failed.
  */
-export async function markMediaViewed(mediaId: string): Promise<void> {
+export async function markMediaViewed(mediaId: string): Promise<boolean> {
   try {
-    await fetch(`${fetchBase}/api/media/${encodeURIComponent(mediaId)}/view`, {
-      method: "POST",
-      headers: { "X-Session-Id": getStoredSessionId() ?? "" },
-    });
+    const res = await fetch(
+      `${fetchBase}/api/media/${encodeURIComponent(mediaId)}/view`,
+      {
+        method: "POST",
+        headers: { "X-Session-Id": getStoredSessionId() ?? "" },
+      },
+    );
+    if (!res.ok) return false;
+    const data = (await res.json()) as { ok?: boolean };
+    return data.ok === true;
   } catch {
-    // ignore – view-once deletion is best-effort
+    return false;
   }
 }

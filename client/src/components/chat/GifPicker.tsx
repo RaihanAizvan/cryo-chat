@@ -29,10 +29,12 @@ function toGifEntry(r: GiphyResult): { id: string; title?: string; preview: stri
     r.images["preview_gif"]?.url ??
     r.images["original"]?.url ??
     "";
-  // `downsized` is capped at ~8 MB, matching our upload limit.
+  // Prefer `fixed_width` (~600px, a few hundred KB) over `downsized` (up to
+  // ~8 MB) so uploads stay small like the user's own photos.
   const full =
-    r.images["downsized"]?.url ??
     r.images["fixed_width"]?.url ??
+    r.images["fixed_height"]?.url ??
+    r.images["downsized"]?.url ??
     r.images["original"]?.url ??
     preview;
   return { id: r.id, title: r.title, preview, full };
