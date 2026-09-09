@@ -30,6 +30,15 @@ Abasthan runs a persistent Node web service, so the whole app fits in one servic
     chat composer. It lives **server-side** (here, in root env — never in
     `client/.env`, which cannot see root vars). Requests are proxied through
     `GET /api/giphy` so the key never reaches the browser.
+  - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`,
+    `CLOUDINARY_UPLOAD_PRESET` — optional; enable CDN-hosted media. The
+    browser uploads big files straight to Cloudinary (unsigned preset), so
+    uploads are immune to the host's reverse-proxy body-size limit and consume
+    **no server RAM** (media stays out of the process's memory). When these are
+    unset, the app falls back to in-memory media uploads (fine for small
+    images). Create the preset in the Cloudinary dashboard as *unsigned*;
+    folder restriction is recommended. View-once/TTL deletion calls Cloudinary's
+    signed destroy API server-side. Free tier is 25 credits/month.
 
 The server serves the built frontend from `client/dist` (built by the build
 command) and handles `/socket.io` WebSockets on the same domain — no CORS needed.

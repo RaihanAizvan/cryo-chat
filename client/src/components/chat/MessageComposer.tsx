@@ -6,7 +6,13 @@ import { IconEmoji, IconImage, IconSend, IconSticker } from "../ui/Icon";
 import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
-import { uploadMedia } from "../../lib/api";
+import {
+  uploadMedia,
+  getCloudinaryPreset,
+  uploadToCloudinary,
+  registerRemoteMedia,
+  type UploadResult,
+} from "../../lib/api";
 import { prepareUpload } from "../../lib/image";
 import { makeSticker } from "../../lib/sticker";
 import { recordEmoji } from "../../lib/emoji";
@@ -123,6 +129,35 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
     };
   }, [pendingObj]);
 
+  /**
+   * Upload a file to the chat. When Cloudinary is configured (server says so),
+   * push the bytes straight to the CDN from the browser and register the
+   * result — big uploads then bypass the host's request-body ceiling and never
+   * touch server RAM. Without it, fall back to the classic in-memory upload.
+   */
+  const uploadAny = async (
+    file: File,
+    opts: { name?: string; sticker?: boolean; viewOnce?: boolean },
+  ): Promise<UploadResult> => {
+    const preset = await getCloudinaryPreset();
+    if (preset) {
+      const r = await uploadToCloudinary(file, preset);
+      return registerRemoteMedia({
+        publicId: r.publicId,
+        width: r.width,
+        height: r.height,
+        viewOnce: opts.viewOnce,
+        name: opts.name,
+        sticker: opts.sticker,
+      });
+    }
+    return uploadMedia(file, {
+      viewOnce: opts.viewOnce,
+      name: opts.name,
+      sticker: opts.sticker,
+    });
+  };
+
   const beginPending = async (file: File) => {
     if (!IMAGE_TYPES.includes(file.type)) return;
     closeAllPanels();
@@ -141,7 +176,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const sendPending = async (caption: string, viewOnce: boolean) => {
     const p = pending;
     if (!p) return;
-    const up = await uploadMedia(p.file, { viewOnce, name: p.file.name });
+    const up = await uploadAny(p.file, { viewOnce, name: p.file.name });
     onSend(caption, {
       type: up.type,
       mediaId: up.mediaId,
@@ -156,7 +191,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   /** Send a sticker immediately (WhatsApp-style, no caption step). */
   const sendSticker = async (file: File) => {
     try {
-      const up = await uploadMedia(file, { name: "sticker", sticker: true });
+      const up = await uploadAny(file, { name: "sticker", sticker: true });
       onSend("", {
         type: "sticker",
         mediaId: up.mediaId,

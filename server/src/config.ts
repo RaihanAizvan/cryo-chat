@@ -35,6 +35,12 @@ export interface Config {
   clientDist: string | null;
   /** Giphy API key used for GIF/sticker search (server-side, never exposed). */
   giphyApiKey: string;
+  /** Cloudinary credentials for remote (CDN-hosted) media. Empty = disabled. */
+  cloudinaryCloudName: string;
+  cloudinaryApiKey: string;
+  cloudinaryApiSecret: string;
+  /** Unsigned upload preset the client uses to push files straight to Cloudinary. */
+  cloudinaryUploadPreset: string;
 }
 
 const list = (v: string | undefined): string[] =>
@@ -65,4 +71,8 @@ export const config: Config = {
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 30_000),
   clientDist: process.env.CLIENT_DIST ?? DEFAULT_CLIENT_DIST,
   giphyApiKey: process.env.GIPHY_API_KEY ?? "",
+  cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME ?? "",
+  cloudinaryApiKey: process.env.CLOUDINARY_API_KEY ?? "",
+  cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
+  cloudinaryUploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET ?? "",
 };
