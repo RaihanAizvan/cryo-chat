@@ -15,43 +15,24 @@ interface Props {
   onClose: () => void;
 }
 
-/** One entry of Giphy's `data` array (see api.giphy.com/v1/gifs/search). */
-interface GiphyResult {
+/** One server-proxied GIF/sticker result (id, title, preview, full). */
+interface GifEntry {
   id: string;
   title?: string;
-  images: Record<
-    string,
-    { url?: string; width?: string; height?: string; size?: string }
-  >;
+  preview: string;
+  full: string;
 }
 
-const GIPHY_KEY = import.meta.env.VITE_GIPHY_API_KEY?.trim() ?? "";
-
-/** Pick a small animated preview and a full-quality version for uploading. */
-function toGifEntry(r: GiphyResult): { id: string; title?: string; preview: string; full: string } {
-  const preview =
-    r.images["fixed_width_small"]?.url ??
-    r.images["fixed_height_small"]?.url ??
-    r.images["preview_gif"]?.url ??
-    r.images["original"]?.url ??
-    "";
-  // Prefer `fixed_width` (~600px, a few hundred KB) over `downsized` (up to
-  // ~8 MB) so uploads stay small like the user's own photos.
-  const full =
-    r.images["fixed_width"]?.url ??
-    r.images["fixed_height"]?.url ??
-    r.images["downsized"]?.url ??
-    r.images["original"]?.url ??
-    preview;
-  return { id: r.id, title: r.title, preview, full };
-}
+/** Server returned 503 because GIPHY_API_KEY is not configured. */
+class GiphyKeyError extends Error {}
 
 /**
- * GIF / sticker picker. With `VITE_GIPHY_API_KEY` configured it shows a
- * searchable Giphy grid (trending until you type) for both animated GIFs and
- * stickers. Without it the panel still supports uploading your own .gif files.
- * Picked media is fetched client-side and funneled into the same upload path as
- * photos, so it stays ephemeral like everything else.
+ * GIF / sticker picker. Search runs server-side (`GET /api/giphy`) so the
+ * Giphy key can live in the server env (Abasthan root settings) instead of a
+ * client build-time `VITE_` var. Without a configured key the panel still
+ * supports uploading your own .gif files. Picked media is fetched client-side
+ * from Giphy's CDN and funneled into the same upload path as photos, so it
+ * stays ephemeral like everything else.
  */
 export function GifPicker({
   initialMode = "gif",
@@ -63,16 +44,15 @@ export function GifPicker({
 }: Props) {
   const [mode, setMode] = useState<"gif" | "sticker">(initialMode);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<ReturnType<typeof toGifEntry>[]>([]);
+  const [results, setResults] = useState<GifEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const seq = useRef(0);
-
-  const searchEnabled = GIPHY_KEY.length > 0;
+  // Search is available until the server says the key is missing (503).
+  const [searchEnabled, setSearchEnabled] = useState(true);
 
   useEffect(() => {
-    if (!searchEnabled) return;
     const q = query.trim();
     const mySeq = ++seq.current;
     setLoading(true);
@@ -80,25 +60,31 @@ export function GifPicker({
     const kind = mode === "sticker" ? "stickers" : "gifs";
     const url = new URL(
       q
-        ? `https://api.giphy.com/v1/${kind}/search`
-        : `https://api.giphy.com/v1/${kind}/trending`,
+        ? `/api/giphy?kind=${kind}&q=${encodeURIComponent(q)}`
+        : `/api/giphy?kind=${kind}`,
+      window.location.origin,
     );
-    url.searchParams.set("api_key", GIPHY_KEY);
-    url.searchParams.set("limit", "28");
-    url.searchParams.set("rating", "g");
-    if (q) url.searchParams.set("q", q);
 
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(url.toString());
-        if (!res.ok) throw new Error("bad");
-        const data = (await res.json()) as { data?: GiphyResult[] };
-        if (mySeq === seq.current && !cancelled) {
-          setResults((data.data ?? []).map(toGifEntry));
+        if (!res.ok) {
+          if (res.status === 503) {
+            throw new GiphyKeyError();
+          }
+          throw new Error("bad");
         }
-      } catch {
+        const data = (await res.json()) as { results: GifEntry[] };
         if (mySeq === seq.current && !cancelled) {
+          setResults(data.results);
+        }
+      } catch (e) {
+        if (mySeq !== seq.current || cancelled) return;
+        if (e instanceof GiphyKeyError) {
+          setSearchEnabled(false);
+          setResults([]);
+        } else {
           setError("GIF search isn't responding. Try again.");
           setResults([]);
         }
@@ -112,7 +98,7 @@ export function GifPicker({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, searchEnabled, mode]);
+  }, [query, mode]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -122,7 +108,7 @@ export function GifPicker({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const pick = async (r: ReturnType<typeof toGifEntry>) => {
+  const pick = async (r: GifEntry) => {
     if (busyId || !r.full) return;
     setBusyId(r.id);
     try {
@@ -223,7 +209,9 @@ export function GifPicker({
 
             {!searchEnabled && (
               <p className="mb-2 text-left text-[11px] leading-relaxed text-ink-faint">
-                Set <code className="rounded bg-base-border px-1">VITE_GIPHY_API_KEY</code> to
+                Set{" "}
+                <code className="rounded bg-base-border px-1">GIPHY_API_KEY</code>{" "}
+                (server env) to
                 search. You can still {mode === "sticker" ? "make your own." : "upload your own."}
               </p>
             )}

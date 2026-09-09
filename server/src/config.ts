@@ -1,7 +1,25 @@
 /**
  * Central configuration, loaded from environment with sane defaults.
  * Keep secrets/internals out of the client.
+ *
+ * Loads a root `.env` (if present) so a single repo-root file works for local
+ * dev and matches Abasthan's "env lives at the root" settings model. Real
+ * deployments inject vars into process.env directly; the file is optional.
  */
+import dotenv from "dotenv";
+import { existsSync } from "node:fs";
+
+/**
+ * Load a repo-root `.env` (gitignored, optional). npm workspaces start this
+ * server with cwd = `server/`, so process.cwd() would miss a root `.env` —
+ * resolve it from this file's location instead. Real deployments inject vars
+ * into process.env directly (dotenv never overrides those), which is how
+ * Abasthan settings are picked up.
+ */
+const rootEnvPath = new URL("../../.env", import.meta.url).pathname;
+if (existsSync(rootEnvPath)) {
+  dotenv.config({ path: rootEnvPath, quiet: true });
+}
 
 export interface Config {
   port: number;
@@ -28,6 +46,14 @@ export interface Config {
   sweepIntervalMs: number;
   /** If set, serve the built client from this directory (production). */
   clientDist: string | null;
+  /** Giphy API key used for GIF/sticker search (server-side, never exposed). */
+  giphyApiKey: string;
+  /** Cloudinary credentials for remote (CDN-hosted) media. Empty = disabled. */
+  cloudinaryCloudName: string;
+  cloudinaryApiKey: string;
+  cloudinaryApiSecret: string;
+  /** Unsigned upload preset the client uses to push files straight to Cloudinary. */
+  cloudinaryUploadPreset: string;
 }
 
 const list = (v: string | undefined): string[] =>
@@ -57,4 +83,9 @@ export const config: Config = {
   reservedRoomCode: process.env.RESERVED_ROOM_CODE ?? "9999",
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 30_000),
   clientDist: process.env.CLIENT_DIST ?? DEFAULT_CLIENT_DIST,
+  giphyApiKey: process.env.GIPHY_API_KEY ?? "",
+  cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME ?? "",
+  cloudinaryApiKey: process.env.CLOUDINARY_API_KEY ?? "",
+  cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
+  cloudinaryUploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET ?? "",
 };

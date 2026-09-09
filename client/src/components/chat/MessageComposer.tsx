@@ -6,7 +6,14 @@ import { IconEmoji, IconImage, IconSend, IconSticker } from "../ui/Icon";
 import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
-import { uploadMedia } from "../../lib/api";
+import {
+  uploadMedia,
+  getCloudinaryPreset,
+  uploadToCloudinary,
+  registerRemoteMedia,
+  type UploadResult,
+} from "../../lib/api";
+import { prepareUpload } from "../../lib/image";
 import { makeSticker } from "../../lib/sticker";
 import { recordEmoji } from "../../lib/emoji";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
@@ -122,19 +129,74 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
     };
   }, [pendingObj]);
 
-  const beginPending = (file: File) => {
+  /**
+   * Upload a file to the chat. When Cloudinary is configured (server says so),
+   * push the bytes straight to the CDN from the browser and register the
+   * result — big uploads then bypass the host's request-body ceiling and never
+   * touch server RAM. If Cloudinary is unavailable/unreachable/out of credits,
+   * fall back to the classic in-memory upload so sending never hard-fails.
+   */
+  const uploadAny = async (
+    file: File,
+    opts: { name?: string; sticker?: boolean; viewOnce?: boolean },
+  ): Promise<UploadResult> => {
+    const preset = await getCloudinaryPreset();
+    if (preset) {
+      try {
+        const r = await uploadToCloudinary(file, preset);
+        return await registerRemoteMedia({
+          publicId: r.publicId,
+          width: r.width,
+          height: r.height,
+          viewOnce: opts.viewOnce,
+          name: opts.name,
+          sticker: opts.sticker,
+        });
+      } catch {
+        // Cloudinary flaked or its budget is gone — try the in-memory path.
+      }
+    }
+    return uploadMedia(file, {
+      viewOnce: opts.viewOnce,
+      name: opts.name,
+      sticker: opts.sticker,
+    });
+  };
+
+  /** Short-lived inline notice for instant-send failures (stickers, etc.). */
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  };
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+
+  const beginPending = async (file: File) => {
     if (!IMAGE_TYPES.includes(file.type)) return;
     closeAllPanels();
-    const url = URL.createObjectURL(file);
+    let f = file;
+    try {
+      f = await prepareUpload(file);
+    } catch {
+      // keep the original on decode failure
+    }
+    const url = URL.createObjectURL(f);
     setPendingObj(url);
-    setPending({ file, previewUrl: url });
+    setPending({ file: f, previewUrl: url });
   };
 
   /** Upload the pending file, then send it as a message with a caption. */
   const sendPending = async (caption: string, viewOnce: boolean) => {
     const p = pending;
     if (!p) return;
-    const up = await uploadMedia(p.file, { viewOnce, name: p.file.name });
+    const up = await uploadAny(p.file, { viewOnce, name: p.file.name });
     onSend(caption, {
       type: up.type,
       mediaId: up.mediaId,
@@ -149,7 +211,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   /** Send a sticker immediately (WhatsApp-style, no caption step). */
   const sendSticker = async (file: File) => {
     try {
-      const up = await uploadMedia(file, { name: "sticker", sticker: true });
+      const up = await uploadAny(file, { name: "sticker", sticker: true });
       onSend("", {
         type: "sticker",
         mediaId: up.mediaId,
@@ -157,8 +219,10 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         height: up.height,
         name: "Sticker",
       });
-    } catch {
-      // silent – a failed sticker needs no UI ceremony
+    } catch (err) {
+      showNotice(
+        err instanceof Error && err.message ? err.message : "Couldn't send that sticker.",
+      );
     }
   };
 
@@ -166,10 +230,15 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const sendStickerFromImage = async (file: File) => {
     if (!file.type.startsWith("image/")) return;
     try {
-      const sticker = await makeSticker(file);
+      let sticker = await makeSticker(file);
+      try {
+        sticker = await prepareUpload(sticker);
+      } catch {
+        // keep the makeSticker output if downscaling fails
+      }
       await sendSticker(sticker);
     } catch {
-      // silent
+      showNotice("Couldn't make a sticker from that image.");
     }
   };
 
@@ -211,6 +280,11 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         right: "env(safe-area-inset-right)",
       }}
     >
+      {notice && (
+        <p className="mx-auto max-w-2xl px-3 pb-1 text-xs font-medium leading-snug text-rose-400">
+          {notice}
+        </p>
+      )}
       <div className="mx-auto flex max-w-2xl items-end gap-2 px-3 py-2.5">
         <button
           onClick={() => {

@@ -12,6 +12,7 @@
 
 import { randomBytes } from "node:crypto";
 import { config } from "./config.js";
+import { destroyRemote } from "./cloudinary.js";
 
 export interface StoredMedia {
   id: string;
@@ -32,6 +33,119 @@ export interface StoredMedia {
 
 const media = new Map<string, StoredMedia>();
 
+/**
+ * Remote (Cloudinary-hosted) media record. No bytes are held in memory — the
+ * record only tracks where the asset lives so it can be served, expired, and
+ * deleted. This keeps RAM flat on the free tier while big files live on the CDN.
+ */
+export interface RemoteMedia {
+  id: string;
+  publicId: string;
+  secureUrl: string;
+  format: string;
+  mime: string;
+  kind: "image" | "gif" | "sticker";
+  width: number;
+  height: number;
+  name?: string;
+  uploadedAt: number;
+  uploadedBy: string;
+  viewOnce: boolean;
+  viewedBy?: string;
+}
+
+const remoteMedia = new Map<string, RemoteMedia>();
+export const MAX_REMOTE_MEDIA_COUNT = 256;
+
+/** Safe public_id shape (folders of `[a-z0-9_-]`, no query params/protocol). */
+const PUBLIC_ID_RE = /^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/;
+
+const FORMAT_MIME: Record<string, string> = {
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+/** Register a validated Cloudinary asset. Null when rejected or at capacity. */
+export function storeRemoteMedia(input: {
+  publicId: string;
+  secureUrl: string;
+  format: string;
+  width: number;
+  height: number;
+  uploadedBy: string;
+  viewOnce?: boolean;
+  name?: string;
+  kind?: "sticker";
+}): RemoteMedia | null {
+  if (!PUBLIC_ID_RE.test(input.publicId)) return null;
+  if (remoteMedia.size >= MAX_REMOTE_MEDIA_COUNT) return null;
+  const mime = FORMAT_MIME[input.format];
+  if (!mime) return null;
+  const kind = input.kind === "sticker" ? "sticker" : input.format === "gif" ? "gif" : "image";
+  const record: RemoteMedia = {
+    id: randomBytes(12).toString("hex"),
+    publicId: input.publicId,
+    secureUrl: input.secureUrl,
+    format: input.format,
+    mime,
+    kind,
+    width: input.width,
+    height: input.height,
+    name: sanitizeName(input.name),
+    uploadedAt: Date.now(),
+    uploadedBy: input.uploadedBy,
+    viewOnce: Boolean(input.viewOnce),
+  };
+  remoteMedia.set(record.id, record);
+  return record;
+}
+
+/**
+ * Resolve a remote upload for fetching. Mirrors `getMediaFor`: consumed
+ * view-once uploads and expired records are gone for everyone.
+ */
+export function getRemoteFor(mediaId: string, sessionId: string): RemoteMedia | null {
+  if (!mediaId) return null;
+  const m = remoteMedia.get(mediaId);
+  if (!m) return null;
+  if (Date.now() - m.uploadedAt > config.messageTtlMs) {
+    remoteMedia.delete(mediaId);
+    void destroyRemote(m.publicId);
+    return null;
+  }
+  if (m.viewOnce && m.viewedBy && m.viewedBy !== sessionId) return null;
+  return m;
+}
+
+/**
+ * Record that a view-once remote upload was opened by a non-uploader. The
+ * record is dropped immediately; the CDN asset is deleted asynchronously.
+ */
+export function consumeRemoteViewOnce(
+  mediaId: string,
+  sessionId: string,
+): RemoteMedia | null {
+  const m = remoteMedia.get(mediaId);
+  if (!m || !m.viewOnce) return null;
+  if (m.uploadedBy === sessionId) return null;
+  remoteMedia.delete(mediaId);
+  void destroyRemote(m.publicId);
+  return m;
+}
+
+/** Expire remote records and delete their CDN assets; call from the sweep. */
+export function pruneRemoteMedia(now = Date.now()): void {
+  for (const [id, m] of remoteMedia) {
+    if (now - m.uploadedAt > config.messageTtlMs) {
+      remoteMedia.delete(id);
+      void destroyRemote(m.publicId);
+    }
+  }
+}
+
 /** Accepted MIME types. Anything else is rejected at upload. */
 const ACCEPTED_MIME = new Set([
   "image/jpeg",
@@ -40,11 +154,16 @@ const ACCEPTED_MIME = new Set([
   "image/gif",
 ]);
 
-export const MAX_MEDIA_BYTES = 8 * 1024 * 1024; // 8 MB
+export const MAX_MEDIA_BYTES = 32 * 1024 * 1024; // 32 MB
 export const MIN_MEDIA_BYTES = 16;
 export const MAX_MEDIA_COUNT = 256;
-/** Rough bound on total buffered bytes to keep the process sane. */
-export const MAX_MEDIA_TOTAL_BYTES = 128 * 1024 * 1024;
+/**
+ * Rough bound on total buffered bytes to keep the process sane. The 32 MB
+ * per-file cap is intentional (host proxies often choke near ~1 MB, so the
+ * client downscales big photos before upload anyway); this total just avoids
+ * unbounded growth, e.g. 8 full-size uploads at once.
+ */
+export const MAX_MEDIA_TOTAL_BYTES = 256 * 1024 * 1024;
 
 /** Newest first eviction when we run out of room — trims nornal media only. */
 function evictOldestNormal(): boolean {
