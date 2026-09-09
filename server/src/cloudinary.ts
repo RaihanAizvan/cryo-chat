@@ -21,16 +21,57 @@ export function isCloudinaryConfigured(): boolean {
   );
 }
 
-/** Public identifiers handed to the client so it can upload directly. */
-export function cloudinaryUploadInfo(): {
+/** Public identifiers handed to the client so it can upload directly. Once the
+ *  free-tier credit budget is nearly exhausted, null is returned so clients
+ *  revert to the in-memory path instead of hard-failing on uploads. */
+export async function cloudinaryUploadInfo(): Promise<{
   cloudName: string;
   uploadPreset: string;
-} | null {
-  if (!isCloudinaryConfigured()) return null;
+} | null> {
+  if (!(await isCloudinaryAvailable())) return null;
   return {
     cloudName: config.cloudinaryCloudName,
     uploadPreset: config.cloudinaryUploadPreset,
   };
+}
+
+/**
+ * Cloudinary's free tier is 25 credits/month; each upload/transform spends one.
+ * Poll account usage (cheap, cached) and flip the export off when almost out so
+ * clients gracefully fall back to in-memory media instead of getting 402s. Any
+ * usage-API failure fails open — the client has a fallback path anyway.
+ */
+const USAGE_CHECK_MS = 5 * 60_000;
+/** Keep serving remote uploads until only this many credits remain. */
+const MIN_REMAINING_CREDITS = 3;
+
+let usageCache: { gated: boolean; checkedAt: number } | null = null;
+
+export async function isCloudinaryAvailable(): Promise<boolean> {
+  if (!isCloudinaryConfigured()) return false;
+  const now = Date.now();
+  if (usageCache && now - usageCache.checkedAt < USAGE_CHECK_MS) {
+    return !usageCache.gated;
+  }
+  try {
+    const gated = await usageGated();
+    usageCache = { gated, checkedAt: now };
+    return !gated;
+  } catch {
+    return true;
+  }
+}
+
+async function usageGated(): Promise<boolean> {
+  ensureConfigured();
+  const res = (await cloudinary.api.usage()) as {
+    credits_usage?: { usage?: unknown; limit?: unknown };
+  };
+  const usage = res.credits_usage;
+  const used = Number(usage?.usage);
+  const limit = Number(usage?.limit);
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return false;
+  return limit - used < MIN_REMAINING_CREDITS;
 }
 
 function ensureConfigured(): void {

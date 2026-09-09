@@ -186,10 +186,11 @@ export function createHttpApp(): express.Express {
   });
 
   // Cloudinary is optional: the client asks here for the direct-upload preset,
-  // and 404s mean "use the in-memory upload path". No API key leaks — unsigned
-  // presets need only the (public) cloud name and preset name.
-  app.get("/api/cloudinary/preset", (_req, res) => {
-    const info = cloudinaryUploadInfo();
+  // and 404s mean "use the in-memory upload path" (unconfigured OR out of
+  // credits). No API key leaks — unsigned presets need only the (public) cloud
+  // name and preset name.
+  app.get("/api/cloudinary/preset", async (_req, res) => {
+    const info = await cloudinaryUploadInfo();
     if (!info) {
       res.status(404).json({ error: "no_cloudinary" });
       return;

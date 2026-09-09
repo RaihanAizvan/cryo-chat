@@ -133,7 +133,8 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
    * Upload a file to the chat. When Cloudinary is configured (server says so),
    * push the bytes straight to the CDN from the browser and register the
    * result — big uploads then bypass the host's request-body ceiling and never
-   * touch server RAM. Without it, fall back to the classic in-memory upload.
+   * touch server RAM. If Cloudinary is unavailable/unreachable/out of credits,
+   * fall back to the classic in-memory upload so sending never hard-fails.
    */
   const uploadAny = async (
     file: File,
@@ -141,15 +142,19 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   ): Promise<UploadResult> => {
     const preset = await getCloudinaryPreset();
     if (preset) {
-      const r = await uploadToCloudinary(file, preset);
-      return registerRemoteMedia({
-        publicId: r.publicId,
-        width: r.width,
-        height: r.height,
-        viewOnce: opts.viewOnce,
-        name: opts.name,
-        sticker: opts.sticker,
-      });
+      try {
+        const r = await uploadToCloudinary(file, preset);
+        return await registerRemoteMedia({
+          publicId: r.publicId,
+          width: r.width,
+          height: r.height,
+          viewOnce: opts.viewOnce,
+          name: opts.name,
+          sticker: opts.sticker,
+        });
+      } catch {
+        // Cloudinary flaked or its budget is gone — try the in-memory path.
+      }
     }
     return uploadMedia(file, {
       viewOnce: opts.viewOnce,
@@ -157,6 +162,21 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
       sticker: opts.sticker,
     });
   };
+
+  /** Short-lived inline notice for instant-send failures (stickers, etc.). */
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showNotice = (msg: string) => {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  };
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
 
   const beginPending = async (file: File) => {
     if (!IMAGE_TYPES.includes(file.type)) return;
@@ -199,8 +219,10 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         height: up.height,
         name: "Sticker",
       });
-    } catch {
-      // silent – a failed sticker needs no UI ceremony
+    } catch (err) {
+      showNotice(
+        err instanceof Error && err.message ? err.message : "Couldn't send that sticker.",
+      );
     }
   };
 
@@ -216,7 +238,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
       }
       await sendSticker(sticker);
     } catch {
-      // silent
+      showNotice("Couldn't make a sticker from that image.");
     }
   };
 
@@ -258,6 +280,11 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         right: "env(safe-area-inset-right)",
       }}
     >
+      {notice && (
+        <p className="mx-auto max-w-2xl px-3 pb-1 text-xs font-medium leading-snug text-rose-400">
+          {notice}
+        </p>
+      )}
       <div className="mx-auto flex max-w-2xl items-end gap-2 px-3 py-2.5">
         <button
           onClick={() => {

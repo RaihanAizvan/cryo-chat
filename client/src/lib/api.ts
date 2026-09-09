@@ -44,7 +44,17 @@ export async function uploadMedia(
     body: file,
   });
   if (!res.ok) {
-    throw new Error(res.status === 413 ? "File too large." : "Upload failed.");
+    let code = "";
+    try {
+      code = ((await res.json()) as { error?: string }).error ?? "";
+    } catch {
+      /* non-JSON error body */
+    }
+    if (code === "too_many_uploads") {
+      throw new Error("Too many uploads right now. Try again in a minute.");
+    }
+    if (res.status === 413) throw new Error("File too large for this server.");
+    throw new Error("Upload failed. Try again.");
   }
   return (await res.json()) as UploadResult;
 }
@@ -168,6 +178,17 @@ export async function registerRemoteMedia(input: {
       height: input.height,
     }),
   });
-  if (!res.ok) throw new Error("Upload failed.");
+  if (!res.ok) {
+    let code = "";
+    try {
+      code = ((await res.json()) as { error?: string }).error ?? "";
+    } catch {
+      /* non-JSON error body */
+    }
+    if (code === "too_many_uploads") {
+      throw new Error("Too many uploads right now. Try again in a minute.");
+    }
+    throw new Error("Upload failed. Try again.");
+  }
   return (await res.json()) as UploadResult;
 }

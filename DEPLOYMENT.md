@@ -38,7 +38,10 @@ Abasthan runs a persistent Node web service, so the whole app fits in one servic
     unset, the app falls back to in-memory media uploads (fine for small
     images). Create the preset in the Cloudinary dashboard as *unsigned*;
     folder restriction is recommended. View-once/TTL deletion calls Cloudinary's
-    signed destroy API server-side. Free tier is 25 credits/month.
+    signed destroy API server-side. Free tier is 25 credits/month; when the
+    account is nearly out of credits the server stops offering the preset and
+    the client silently falls back to in-memory uploads, so sending never
+    hard-fails.
 
 The server serves the built frontend from `client/dist` (built by the build
 command) and handles `/socket.io` WebSockets on the same domain — no CORS needed.
