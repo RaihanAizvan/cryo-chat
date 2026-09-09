@@ -6,7 +6,20 @@
  * dev and matches Abasthan's "env lives at the root" settings model. Real
  * deployments inject vars into process.env directly; the file is optional.
  */
-import "dotenv/config";
+import dotenv from "dotenv";
+import { existsSync } from "node:fs";
+
+/**
+ * Load a repo-root `.env` (gitignored, optional). npm workspaces start this
+ * server with cwd = `server/`, so process.cwd() would miss a root `.env` —
+ * resolve it from this file's location instead. Real deployments inject vars
+ * into process.env directly (dotenv never overrides those), which is how
+ * Abasthan settings are picked up.
+ */
+const rootEnvPath = new URL("../../.env", import.meta.url).pathname;
+if (existsSync(rootEnvPath)) {
+  dotenv.config({ path: rootEnvPath, quiet: true });
+}
 
 export interface Config {
   port: number;
