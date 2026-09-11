@@ -10,9 +10,11 @@
 
 export interface UploadResult {
   mediaId: string;
-  type: "image" | "gif" | "sticker";
+  type: "image" | "gif" | "sticker" | "voice";
   width?: number;
   height?: number;
+  /** Length of a voice note in seconds. */
+  duration?: number;
   name?: string;
   viewOnce: boolean;
 }
@@ -28,7 +30,15 @@ const fetchBase = serverUrl ? serverUrl : "";
  */
 export async function uploadMedia(
   file: File | Blob,
-  options: { viewOnce?: boolean; name?: string; sticker?: boolean } = {},
+  options: {
+    viewOnce?: boolean;
+    name?: string;
+    sticker?: boolean;
+    /** Voice notes always ride the in-memory upload path. */
+    voice?: boolean;
+    /** Seconds-long voice note length, sent with the upload. */
+    duration?: number;
+  } = {},
 ): Promise<UploadResult> {
   const headers: Record<string, string> = {
     "X-Session-Id": getStoredSessionId() ?? "",
@@ -37,6 +47,10 @@ export async function uploadMedia(
   if (options.viewOnce) headers["X-View-Once"] = "1";
   if (options.name) headers["X-Media-Name"] = options.name;
   if (options.sticker) headers["X-Media-Kind"] = "sticker";
+  if (options.voice) {
+    headers["X-Media-Kind"] = "voice";
+    if (options.duration != null) headers["X-Media-Duration"] = String(options.duration);
+  }
 
   const res = await fetch(`${fetchBase}/api/media`, {
     method: "POST",
