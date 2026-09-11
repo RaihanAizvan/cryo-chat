@@ -170,10 +170,10 @@ export interface PublicMessage {
   attachment?: MessageAttachment;
 }
 
-/** An uploaded image/gif/sticker attached to a chat message. */
+/** An uploaded image/gif/sticker/voice-note attached to a chat message. */
 export interface MessageAttachment {
-  /** Still image, animated gif, or square sticker (WhatsApp-style). */
-  type: "image" | "gif" | "sticker";
+  /** Still image, animated gif, square sticker (WhatsApp-style), or voice note. */
+  type: "image" | "gif" | "sticker" | "voice";
   /** Server-assigned id used to fetch the media. */
   mediaId: string;
   /** One-time media: bytes are deleted after the first non-uploader view. */
@@ -183,6 +183,8 @@ export interface MessageAttachment {
   height?: number;
   /** Sanitized original file name, if provided at upload. */
   name?: string;
+  /** Length of a voice note in seconds. */
+  duration?: number;
 }
 
 export type MessageKind = "user" | "system";
