@@ -2,10 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { MessageAttachment } from "@cryo/shared";
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
-import { IconEmoji, IconImage, IconSend, IconSticker } from "../ui/Icon";
+import { IconEmoji, IconImage, IconMic, IconSend, IconSticker } from "../ui/Icon";
 import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
+import { VoiceRecorder } from "./VoiceRecorder";
 import {
   uploadMedia,
   getCloudinaryPreset,
@@ -16,6 +17,7 @@ import {
 import { prepareUpload } from "../../lib/image";
 import { makeSticker } from "../../lib/sticker";
 import { recordEmoji } from "../../lib/emoji";
+import { startVoiceRecording, type ActiveVoiceRecording } from "../../lib/voice";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
 
 interface Props {
@@ -37,6 +39,9 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
   const [pending, setPending] = useState<PendingMedia | null>(null);
+  const [rec, setRec] = useState<ActiveVoiceRecording | null>(null);
+  const [recStartedAt, setRecStartedAt] = useState(0);
+  const [recBusy, setRecBusy] = useState(false);
   const isCoarse = useCoarsePointer();
   const { inset } = useKeyboardInset();
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -51,7 +56,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   };
 
   useEffect(() => {
-    if (!emojiOpen && !gifOpen && !pending) return;
+    if (!emojiOpen && !gifOpen && !pending && !rec) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       setEmojiOpen(false);
@@ -60,10 +65,15 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         setPending(null);
         setPendingObj(null);
       }
+      if (rec && !recBusy) {
+        rec.cancel();
+        setRec(null);
+        setRecStartedAt(0);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [emojiOpen, gifOpen, pending]);
+  }, [emojiOpen, gifOpen, pending, rec, recBusy]);
 
   // Keep the enter key behavior: on touch, Enter inserts newline → user taps
   // the send button. On desktop, Enter sends (Shift+Enter for newline).
@@ -138,8 +148,18 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
    */
   const uploadAny = async (
     file: File,
-    opts: { name?: string; sticker?: boolean; viewOnce?: boolean },
+    opts: { name?: string; sticker?: boolean; viewOnce?: boolean; voice?: boolean; duration?: number },
   ): Promise<UploadResult> => {
+    // Voice notes are tiny — never round-trip them through Cloudinary, just
+    // use the in-memory upload path directly.
+    if (opts.voice) {
+      return uploadMedia(file, {
+        viewOnce: opts.viewOnce,
+        name: opts.name,
+        voice: true,
+        duration: opts.duration,
+      });
+    }
     const preset = await getCloudinaryPreset();
     if (preset) {
       try {
@@ -251,6 +271,52 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
     taRef.current?.focus();
   };
 
+  /** Start recording a voice note (mic permission prompt on first use). */
+  const startVoice = async () => {
+    closeAllPanels();
+    setRecStartedAt(0);
+    try {
+      const r = await startVoiceRecording();
+      if (!r) {
+        showNotice("Couldn't start recording. Check your microphone permission.");
+        return;
+      }
+      setRec(r);
+      setRecStartedAt(Date.now());
+    } catch {
+      showNotice("Couldn't start recording. Check your microphone permission.");
+    }
+  };
+
+  /** Stop the recorder, upload the note (in-memory path), and send it. */
+  const sendVoiceNote = async () => {
+    if (!rec || recBusy) return;
+    setRecBusy(true);
+    try {
+      const { blob, duration } = await rec.stop();
+      const file = new File([blob], "voice-note.webm", {
+        type: blob.type || "audio/webm",
+      });
+      const up = await uploadAny(file, { name: "Voice note", voice: true, duration });
+      onSend("", { type: "voice", mediaId: up.mediaId, duration: up.duration, name: up.name });
+    } catch (err) {
+      showNotice(
+        err instanceof Error && err.message ? err.message : "Couldn't send the voice note.",
+      );
+    } finally {
+      setRec(null);
+      setRecStartedAt(0);
+      setRecBusy(false);
+    }
+  };
+
+  /** Discard a recording without uploading. */
+  const cancelVoiceNote = () => {
+    rec?.cancel();
+    setRec(null);
+    setRecStartedAt(0);
+  };
+
   /** Paste an image straight into the composer (WhatsApp-style). */
   const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
@@ -348,7 +414,20 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         </button>
 
         <button
-          onClick={submit}
+          type="button"
+          onClick={() => void startVoice()}
+          disabled={recBusy}
+          aria-label={rec ? "Restart voice note" : "Record voice note"}
+          className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+            rec
+              ? "bg-rose-500/15 text-rose-500"
+              : "text-ink-muted hover:bg-base-raised active:bg-base-border"
+          }`}
+        >
+          <IconMic width={21} height={21} />
+        </button>
+
+        <button
           disabled={!text.trim()}
           aria-label="Send message"
           className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
@@ -428,6 +507,15 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
             <EmojiPicker onPick={insertEmoji} />
           </div>
         </>
+      )}
+
+      {!pending && rec && (
+        <VoiceRecorder
+          startedAt={recStartedAt}
+          busy={recBusy}
+          onSend={() => sendVoiceNote()}
+          onCancel={cancelVoiceNote}
+        />
       )}
     </div>
   );
