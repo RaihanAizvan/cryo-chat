@@ -125,11 +125,21 @@ export function createHttpApp(): express.Express {
       const viewOnce = req.headers["x-view-once"] === "1" || req.headers["x-view-once"] === "true";
       const name = req.headers["x-media-name"];
       const kindHeader = req.headers["x-media-kind"];
+      const durationHeader = req.headers["x-media-duration"];
 
       const stored = storeMedia(bytes, mime, sessionId, {
         viewOnce,
         name: typeof name === "string" ? name : undefined,
-        kind: kindHeader === "sticker" ? "sticker" : undefined,
+        kind:
+          kindHeader === "sticker"
+            ? "sticker"
+            : kindHeader === "voice"
+              ? "voice"
+              : undefined,
+        duration:
+          typeof durationHeader === "string" && durationHeader.trim() !== ""
+            ? Number.parseFloat(durationHeader)
+            : undefined,
       });
       if (!stored) {
         // Distinguish "rejected payload" from "at capacity" without leaking.
@@ -141,6 +151,7 @@ export function createHttpApp(): express.Express {
         type: stored.kind,
         width: stored.width,
         height: stored.height,
+        duration: stored.duration,
         name: stored.name ?? null,
         viewOnce: stored.viewOnce,
       });
