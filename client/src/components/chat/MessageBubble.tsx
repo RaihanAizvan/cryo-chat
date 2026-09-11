@@ -5,6 +5,7 @@ import { formatTime } from "../../lib/format";
 import { IconCheck, IconClock, IconAlertTriangle, IconDoubleTick } from "../ui/Icon";
 import { isEmojiOnly } from "../../lib/emojiDetect";
 import { MediaMessage } from "./MediaMessage";
+import { VoiceMessage } from "./VoiceMessage";
 
 interface Props {
   message: PublicMessage;
@@ -138,7 +139,53 @@ export function MessageBubble({ message, mine, firstInGroup, seen, sessionId }: 
           </span>
         )}
 
-        {hasMedia ? (
+        {hasMedia && message.attachment?.type === "voice" ? (
+          <>
+            <div
+              className={`cryo-in w-72 max-w-full ${
+                mine
+                  ? "rounded-bubble rounded-br-md bg-accent text-white"
+                  : "rounded-bubble rounded-bl-md border border-base-border bg-base-raised text-ink"
+              }`}
+            >
+              <div className="px-3.5 pb-1 pt-3">
+                <VoiceMessage
+                  attachment={message.attachment}
+                  sessionId={sessionId}
+                  mine={mine}
+                />
+              </div>
+              <span
+                className={`flex items-center justify-end gap-0.5 whitespace-nowrap pb-2 pr-3.5 text-[9px] leading-none ${
+                  mine ? "text-white/60" : "text-ink-faint"
+                }`}
+              >
+                {timeAndStatus}
+              </span>
+            </div>
+            {message.text && (
+              <div
+                className={`mt-1 max-w-full px-1 text-[15px] leading-relaxed ${
+                  mine ? "text-right" : "text-left"
+                }`}
+              >
+                <span className="whitespace-pre-wrap [overflow-wrap:anywhere] text-ink">
+                  {emojiOnly ? (
+                    <span className="block break-all text-[2.6rem] leading-[1.15]">
+                      {message.text}
+                    </span>
+                  ) : (
+                    renderText(message.text)
+                  )}
+                </span>
+                <span className="ml-1.5 flex items-center gap-0.5 whitespace-nowrap text-[9px] leading-none text-ink-faint">
+                  {formatTime(message.sentAt)}
+                  {mine && <StatusIcon status={status} tone="plain" />}
+                </span>
+              </div>
+            )}
+          </>
+        ) : hasMedia ? (
           <>
             <div
               className={`${
