@@ -470,6 +470,7 @@ export function startSweeper(io: Server): NodeJS.Timeout {
   const interval = setInterval(() => {
     messageLimiter.sweep();
     media.pruneMedia();
+    media.pruneRemoteMedia();
     for (const room of rooms.allRooms()) {
       if (rooms.isExpired(room)) {
         io.to(room.id).emit("room:expired", { roomId: room.id });

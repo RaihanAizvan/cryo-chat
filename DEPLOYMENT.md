@@ -26,6 +26,22 @@ Abasthan runs a persistent Node web service, so the whole app fits in one servic
   - `MAX_ROOM_SIZE` — optional, default `50`.
   - `CORS_ORIGIN` — optional; same-origin requests are allowed, so you generally
     don't need this. Set it only if a separate site connects to the socket.
+  - `GIPHY_API_KEY` — optional; set this to enable GIF/sticker search in the
+    chat composer. It lives **server-side** (here, in root env — never in
+    `client/.env`, which cannot see root vars). Requests are proxied through
+    `GET /api/giphy` so the key never reaches the browser.
+  - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`,
+    `CLOUDINARY_UPLOAD_PRESET` — optional; enable CDN-hosted media. The
+    browser uploads big files straight to Cloudinary (unsigned preset), so
+    uploads are immune to the host's reverse-proxy body-size limit and consume
+    **no server RAM** (media stays out of the process's memory). When these are
+    unset, the app falls back to in-memory media uploads (fine for small
+    images). Create the preset in the Cloudinary dashboard as *unsigned*;
+    folder restriction is recommended. View-once/TTL deletion calls Cloudinary's
+    signed destroy API server-side. Free tier is 25 credits/month; when the
+    account is nearly out of credits the server stops offering the preset and
+    the client silently falls back to in-memory uploads, so sending never
+    hard-fails.
 
 The server serves the built frontend from `client/dist` (built by the build
 command) and handles `/socket.io` WebSockets on the same domain — no CORS needed.
@@ -39,5 +55,11 @@ command) and handles `/socket.io` WebSockets on the same domain — no CORS need
   The client connects to that URL via Socket.IO.
 
 ### Local development
-Vite (in `client/`) proxies `/socket.io` and `/health` to `localhost:4000`, so the
-app runs locally with `npm run dev`. No `VITE_SERVER_URL` needed.
+Vite (in `client/`) proxies `/socket.io` and `/health` and `/api` to
+`localhost:4000`, so the app runs locally with `npm run dev`. No
+`VITE_SERVER_URL` needed.
+
+For GIF/sticker search locally, create a root `.env` (the server auto-loads it
+via dotenv) with `GIPHY_API_KEY=<key>` and restart the server. The key is read
+at runtime, so there's no rebuild — but the server process must restart once
+after the file changes.
