@@ -329,6 +329,12 @@ export function MessageComposer({
         </div>
       )}
 
+      {notice && (
+        <p className="mx-auto max-w-2xl px-3 pb-1 text-xs font-medium leading-snug text-rose-400">
+          {notice}
+        </p>
+      )}
+
       <div className="mx-auto flex max-w-2xl items-end gap-2 px-3 py-2.5">
         <button
           onClick={() => {
