@@ -151,7 +151,7 @@ export function AdminRoomDetail({ roomId, onBack }: { roomId: string; onBack: ()
       <Card>
         <CardHeader
           title="Members"
-          subtitle="kick removes, ban also blocks identity re-entry"
+          subtitle="kick removes · ban blocks re-entry · unban restores"
           right={
             <span className="text-xs tabular-nums text-ink-faint">
               {r.participantCount} online
@@ -188,32 +188,50 @@ export function AdminRoomDetail({ roomId, onBack }: { roomId: string; onBack: ()
                   </div>
                   <span className="ml-1 flex shrink-0 gap-1">
                     {p.id === r.hostId && <Badge tone="accent">host</Badge>}
-                    <Badge tone="green">in room</Badge>
+                    {p.banned ? <Badge tone="rose">banned</Badge> : <Badge tone="green">in room</Badge>}
                   </span>
                 </div>
                 <div className="flex shrink-0 gap-1.5">
-                  <DangerButton
-                    label="Kick"
-                    busyLabel="Kicking…"
-                    confirmLabel="Kick?"
-                    busy={working(`kick:${p.id}`)}
-                    onConfirm={() =>
-                      run(`kick:${p.id}`, () => adminApi.kick(roomId, p.id), "Member kicked")
-                    }
-                  />
-                  <DangerButton
-                    label="Kick + ban"
-                    busyLabel="Banning…"
-                    confirmLabel="Ban?"
-                    busy={working(`ban:${p.id}`)}
-                    onConfirm={() =>
-                      run(
-                        `ban:${p.id}`,
-                        () => adminApi.kick(roomId, p.id, true),
-                        "Member kicked and identity banned",
-                      )
-                    }
-                  />
+                  {p.banned ? (
+                    <button
+                      onClick={() =>
+                        void run(
+                          `unban:${p.id}`,
+                          () => adminApi.unbanUser(p.id),
+                          "Identity unbanned",
+                        )
+                      }
+                      disabled={working(`unban:${p.id}`)}
+                      className="rounded-lg border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/10 disabled:opacity-50"
+                    >
+                      {working(`unban:${p.id}`) ? "Unbanning…" : "Unban"}
+                    </button>
+                  ) : (
+                    <>
+                      <DangerButton
+                        label="Kick"
+                        busyLabel="Kicking…"
+                        confirmLabel="Kick?"
+                        busy={working(`kick:${p.id}`)}
+                        onConfirm={() =>
+                          run(`kick:${p.id}`, () => adminApi.kick(roomId, p.id), "Member kicked")
+                        }
+                      />
+                      <DangerButton
+                        label="Kick + ban"
+                        busyLabel="Banning…"
+                        confirmLabel="Ban?"
+                        busy={working(`ban:${p.id}`)}
+                        onConfirm={() =>
+                          run(
+                            `ban:${p.id}`,
+                            () => adminApi.kick(roomId, p.id, true),
+                            "Member kicked and identity banned",
+                          )
+                        }
+                      />
+                    </>
+                  )}
                 </div>
               </div>
             ))}
