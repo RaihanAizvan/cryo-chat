@@ -331,7 +331,16 @@ export function attachClientStatic(app: express.Express): void {
   app.get("/r/:roomId", (_req, res) => {
     res.sendFile(path.join(dist, "index.html"));
   });
-  app.get("*", (_req, res) => {
+  app.get("*", (req, res) => {
+    // Never serve index.html for paths that look like a static file (e.g.
+    // /assets/<hash>.js): when express.static misses (stale cached page
+    // referencing a removed asset) the fallback must 404 rather than return
+    // HTML with a JS/CSS request, which corrupts the page in the browser.
+    const last = req.path.split("/").pop() ?? "";
+    if (last.includes(".")) {
+      res.status(404).end();
+      return;
+    }
     res.sendFile(path.join(dist, "index.html"));
   });
 }
