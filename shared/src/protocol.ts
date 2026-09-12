@@ -260,9 +260,15 @@ export interface AdminRoomSummary {
   messageCount: number;
 }
 
+/** Member row in the admin room detail (adds moderation state). */
+export interface AdminRoomParticipant extends Participant {
+  /** Whether this member's identity is currently banned. */
+  banned: boolean;
+}
+
 /** Full room inspection: members + message log. */
 export interface AdminRoomDetail extends AdminRoomSummary {
-  participants: Participant[];
+  participants: AdminRoomParticipant[];
   messages: AdminMessage[];
 }
 

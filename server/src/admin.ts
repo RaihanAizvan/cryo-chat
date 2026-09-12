@@ -85,6 +85,7 @@ function roomDetail(r: rooms.Room): AdminRoomDetail {
       joinedAt: p.joinedAt,
       status: "online" as const,
       lastSeenMessageId: p.lastSeenMessageId,
+      banned: bans.isBanned(p.id),
     })),
     messages: r.messages.map((m) => ({
       id: m.id,
