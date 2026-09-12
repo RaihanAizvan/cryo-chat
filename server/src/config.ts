@@ -25,6 +25,8 @@ export interface Config {
   port: number;
   /** Comma separated list of allowed origins for CORS. */
   corsOrigin: string[];
+  /** Shared secret for the /admin console. Empty = admin API disabled. */
+  adminKey: string;
   /** In-memory message retention window before pruning. */
   messageTtlMs: number;
   /** Rolling cap of messages retained per room (newest kept). */
@@ -72,6 +74,7 @@ const DEFAULT_CLIENT_DIST = new URL("../../client/dist", import.meta.url).pathna
 export const config: Config = {
   port: Number(process.env.PORT ?? 4000),
   corsOrigin: corsOriginList(process.env.CORS_ORIGIN),
+  adminKey: process.env.ADMIN_KEY ?? "",
   messageTtlMs: Number(process.env.MESSAGE_TTL_MS ?? 1000 * 60 * 60 * 24),
   messageCap: Number(process.env.MESSAGE_CAP ?? 200),
   roomTtlMs: Number(process.env.ROOM_TTL_MS ?? 1000 * 60 * 60 * 2),
