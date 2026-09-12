@@ -18,6 +18,10 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:4000",
       },
+      // Admin console API.
+      "/admin": {
+        target: "http://localhost:4000",
+      },
     },
   },
   build: {

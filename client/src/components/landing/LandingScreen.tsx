@@ -113,6 +113,14 @@ export function LandingScreen({ state, actions }: Props) {
           Join a room
           <IconArrowRight width={18} height={18} />
         </button>
+
+        {/* Admin console (key-protected) */}
+        <a
+          href="/admin"
+          className="mx-auto mt-1 text-[11px] text-ink-faint/70 underline-offset-2 transition-colors hover:text-ink-muted hover:underline"
+        >
+          Admin
+        </a>
       </div>
 
       {joinOpen && (
