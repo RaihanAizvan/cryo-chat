@@ -316,19 +316,22 @@ export function createHttpApp(): express.Express {
     }
   });
 
-  // Production static serving of the built client.
-  if (config.clientDist) {
-    const dist = path.resolve(config.clientDist);
-    if (fs.existsSync(dist)) {
-      app.use(express.static(dist));
-      app.get("/r/:roomId", (_req, res) => {
-        res.sendFile(path.join(dist, "index.html"));
-      });
-      app.get("*", (_req, res) => {
-        res.sendFile(path.join(dist, "index.html"));
-      });
-    }
-  }
-
   return app;
+}
+
+/**
+ * Production static serving of the built client. Must run after all API/admin
+ * routes have been mounted so the SPA catch-all doesn't shadow them.
+ */
+export function attachClientStatic(app: express.Express): void {
+  if (!config.clientDist) return;
+  const dist = path.resolve(config.clientDist);
+  if (!fs.existsSync(dist)) return;
+  app.use(express.static(dist));
+  app.get("/r/:roomId", (_req, res) => {
+    res.sendFile(path.join(dist, "index.html"));
+  });
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(dist, "index.html"));
+  });
 }

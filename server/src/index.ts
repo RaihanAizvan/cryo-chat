@@ -6,10 +6,12 @@
 import http from "node:http";
 import { Server } from "socket.io";
 import { config } from "./config.js";
-import { createHttpApp } from "./http.js";
+import { createHttpApp, attachClientStatic } from "./http.js";
 import { socketIoCors } from "./cors.js";
 import { attachHandlers, startSweeper } from "./handlers.js";
 import { destroy } from "./sessions.js";
+import { getSettings } from "./settings.js";
+import { mountAdminRoutes } from "./admin.js";
 
 const app = createHttpApp();
 const server = http.createServer(app);
@@ -25,13 +27,18 @@ const io = new Server(server, {
   },
 });
 
+// Admin console first (guarded by X-Admin-Key) so the SPA catch-all never
+// shadows it, then the built client in production.
+mountAdminRoutes(app, io);
+attachClientStatic(app);
+
 // Per-IP socket limit tracked here (close to connection lifecycle).
 const ipCounter = new Map<string, number>();
 
 io.use((socket, next) => {
   const ip = socket.handshake.address;
   const count = ipCounter.get(ip) ?? 0;
-  if (count >= config.maxSocketsPerIp) {
+  if (count >= getSettings().maxSocketsPerIp) {
     next(new Error("connection_limit"));
     return;
   }
