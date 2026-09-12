@@ -111,6 +111,10 @@ ok("message echoed to bob");
   const detail = await json(`/rooms/${created.id}`);
   assert(detail.status === 200 && detail.body.room.participants.length >= 2, `room detail has 2+ members`);
   assert(detail.body.room.messages.some((m) => m.text === "hello admin"), "message log contains sent text");
+  // Each participant row now includes a `banned` flag for the unban UI.
+  const p = detail.body.room.participants[0];
+  assert(typeof p.banned === "boolean", `participant has banned flag (${typeof p.banned})`);
+  assert(p.banned === false, `participant not banned (${p.banned})`);
 
   const users = await json("/users");
   assert(array(users.body.users).length >= 2, `users lists identities (${array(users.body.users).length})`);
