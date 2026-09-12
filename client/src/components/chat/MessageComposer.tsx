@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
-import type { MessageAttachment } from "@cryo/shared";
+import type { MessageAttachment, PublicMessage } from "@cryo/shared";
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
-import { IconEmoji, IconImage, IconSend, IconSticker } from "../ui/Icon";
+import { IconEmoji, IconImage, IconReply, IconSend, IconSticker, IconX } from "../ui/Icon";
 import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
@@ -19,10 +19,13 @@ import { recordEmoji } from "../../lib/emoji";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
 
 interface Props {
-  onSend: (text: string, attachment?: MessageAttachment) => void;
+  onSend: (text: string, attachment?: MessageAttachment, replyTo?: PublicMessage) => void;
   onHeightChange?: (height: number) => void;
   /** Called (throttled) while the user types, to show the typing indicator. */
   onTyping?: () => void;
+  /** Message being replied to (quote pill above the input). */
+  replyTarget?: PublicMessage | null;
+  onCancelReply?: () => void;
 }
 
 interface PendingMedia {
@@ -32,7 +35,25 @@ interface PendingMedia {
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
-export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
+/** Snippet shown in the reply pill: the message text, or a media label. */
+function replyPreview(m: PublicMessage): string {
+  if (m.text) return m.text;
+  const a = m.attachment;
+  if (!a) return "";
+  if (a.viewOnce) return "One-time media";
+  if (a.type === "gif") return "GIF";
+  if (a.type === "sticker") return "Sticker";
+  if (a.name) return a.name;
+  return "Photo";
+}
+
+export function MessageComposer({
+  onSend,
+  onHeightChange,
+  onTyping,
+  replyTarget,
+  onCancelReply,
+}: Props) {
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
@@ -92,7 +113,7 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    onSend(trimmed);
+    onSend(trimmed, undefined, replyTarget ?? undefined);
     setText("");
     taRef.current?.focus();
   };
@@ -280,11 +301,40 @@ export function MessageComposer({ onSend, onHeightChange, onTyping }: Props) {
         right: "env(safe-area-inset-right)",
       }}
     >
+      {replyTarget && (
+        <div className="mx-auto max-w-2xl px-3 pt-2">
+          <div className="cryo-in flex items-center gap-2.5 rounded-2xl border border-base-border2 bg-base-raised px-3 py-1.5">
+            <IconReply
+              width={15}
+              height={15}
+              className="shrink-0 -scale-x-100 text-accent"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[10px] font-semibold text-accent">
+                {replyTarget.name}
+              </div>
+              <div className="truncate text-xs text-ink-muted">
+                {replyPreview(replyTarget)}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onCancelReply}
+              aria-label="Cancel reply"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-base-border hover:text-ink"
+            >
+              <IconX width={13} height={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {notice && (
         <p className="mx-auto max-w-2xl px-3 pb-1 text-xs font-medium leading-snug text-rose-400">
           {notice}
         </p>
       )}
+
       <div className="mx-auto flex max-w-2xl items-end gap-2 px-3 py-2.5">
         <button
           onClick={() => {

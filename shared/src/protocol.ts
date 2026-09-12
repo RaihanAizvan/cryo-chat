@@ -29,12 +29,13 @@ export interface ClientToServerEventMap {
   "room:rename": { roomId: string; participantId: string; name: string };
   /** Send a chat message. clientId lets the sender match their optimistic copy.
    *  An image/gif message may carry `attachment`; `text` then holds the caption
-   *  (and may be empty). */
+   *  (and may be empty). `replyTo` quotes an earlier user message. */
   "message:send": {
     roomId: string;
     text: string;
     clientId?: string;
     attachment?: { mediaId: string };
+    replyTo?: { messageId: string };
   };
   /** Broadcast a typing indicator to other room members. */
   "message:typing": { roomId: string };
@@ -168,6 +169,22 @@ export interface PublicMessage {
   status?: "pending" | "failed";
   /** Uploaded image/gif shown with, or instead of, text. */
   attachment?: MessageAttachment;
+  /** The message this one is replying to (quote block above the bubble). */
+  replyTo?: MessageReply;
+}
+
+/** Snapshot of a quoted message, resolved server-side when sending. */
+export interface MessageReply {
+  messageId: string;
+  participantId: string;
+  /** Display name of the quoted author. */
+  name: string;
+  /** Preview text (caption for media messages; may be empty). */
+  text: string;
+  /** Media summary for the quote. Omitted for view-once (no preview). */
+  attachment?: { type: "image" | "gif" | "sticker"; mediaId?: string; name?: string };
+  /** True when the original is one-time media (preview hidden). */
+  viewOnce?: boolean;
 }
 
 /** An uploaded image/gif/sticker attached to a chat message. */
