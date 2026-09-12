@@ -188,3 +188,42 @@ export function DangerButton({
     </button>
   );
 }
+
+/** Prev/next + page indicator used to walk paginated admin lists. */
+export function Pagination({
+  page,
+  pageCount,
+  total,
+  pageSize,
+  onPage,
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  onPage: (p: number) => void;
+}) {
+  if (pageCount <= 1) return null;
+  const from = page * pageSize + 1;
+  const to = Math.min(total, (page + 1) * pageSize);
+  const btn =
+    "rounded-lg border border-base-border2 bg-base-raised px-2.5 py-1 text-xs font-medium text-ink-muted transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-35";
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-base-border px-4 py-3">
+      <span className="text-xs tabular-nums text-ink-faint">
+        {from}–{to} of {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button className={btn} disabled={page <= 0} onClick={() => onPage(page - 1)}>
+          ← Prev
+        </button>
+        <span className="text-xs tabular-nums text-ink-faint">
+          Page {page + 1} / {pageCount}
+        </span>
+        <button className={btn} disabled={page >= pageCount - 1} onClick={() => onPage(page + 1)}>
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}

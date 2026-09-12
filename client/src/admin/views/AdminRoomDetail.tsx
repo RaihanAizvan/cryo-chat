@@ -2,8 +2,9 @@ import { useCallback, useState } from "react";
 import type { AdminMessage, AdminRoomDetail, AdminRoomSummary } from "@cryo/shared";
 import { avatarColor } from "@cryo/shared";
 import { adminApi } from "../adminApi";
-import { Badge, Card, CardHeader, DangerButton, EmptyState, ErrorBanner, Spinner } from "../components";
+import { Badge, Card, CardHeader, DangerButton, EmptyState, ErrorBanner, Pagination, Spinner } from "../components";
 import { usePoll } from "../usePoll";
+import { usePagination } from "../usePagination";
 import { fmtDuration, fmtExpiry, fmtNum, fmtTime, shortId } from "../format";
 import { IconBack, IconRefresh } from "../../components/ui/Icon";
 
@@ -34,6 +35,13 @@ export function AdminRoomDetail({ roomId, onBack }: { roomId: string; onBack: ()
   );
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [flash, setFlash] = useState<string | null>(null);
+
+  const messagePager = usePagination(messages.data ?? [], 200, roomId);
+  const memberPager = usePagination(
+    (room.data?.participants as AdminRoomDetail["participants"] | undefined) ?? [],
+    50,
+    roomId,
+  );
 
   const working = (key: string) => busy[key] === true;
 
@@ -165,77 +173,83 @@ export function AdminRoomDetail({ roomId, onBack }: { roomId: string; onBack: ()
         ) : (r.participants ?? []).length === 0 ? (
           <EmptyState label="No members right now." />
         ) : (
-          <div className="max-h-[280px] divide-y divide-base-border overflow-y-auto px-2">
-            {(r.participants ?? []).map((p) => (
-              <div
-                key={p.id}
-                className="flex items-center justify-between gap-3 px-2 py-2.5"
-              >
-                <div className="flex min-w-0 items-center gap-2.5">
-                  <span
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-[#0a0a0c]"
-                    style={{ backgroundColor: avatarColor(p.color) }}
-                  >
-                    {p.name.slice(0, 1).toUpperCase()}
-                  </span>
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium" style={{ color: avatarColor(p.color) }}>
-                      {p.name}
-                    </div>
-                    <div className="truncate font-mono text-[11px] text-ink-faint">
-                      {shortId(p.id)} · joined {fmtTime(p.joinedAt)}
-                    </div>
-                  </div>
-                  <span className="ml-1 flex shrink-0 gap-1">
-                    {p.id === r.hostId && <Badge tone="accent">host</Badge>}
-                    {p.banned ? <Badge tone="rose">banned</Badge> : <Badge tone="green">in room</Badge>}
-                  </span>
-                </div>
-                <div className="flex shrink-0 gap-1.5">
-                  {p.banned ? (
-                    <button
-                      onClick={() =>
-                        void run(
-                          `unban:${p.id}`,
-                          () => adminApi.unbanUser(p.id),
-                          "Identity unbanned",
-                        )
-                      }
-                      disabled={working(`unban:${p.id}`)}
-                      className="rounded-lg border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/10 disabled:opacity-50"
+          <>
+            <div className="max-h-[280px] divide-y divide-base-border overflow-y-auto px-2">
+              {memberPager.slice.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-3 px-2 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-[#0a0a0c]"
+                      style={{ backgroundColor: avatarColor(p.color) }}
                     >
-                      {working(`unban:${p.id}`) ? "Unbanning…" : "Unban"}
-                    </button>
-                  ) : (
-                    <>
-                      <DangerButton
-                        label="Kick"
-                        busyLabel="Kicking…"
-                        confirmLabel="Kick?"
-                        busy={working(`kick:${p.id}`)}
-                        onConfirm={() =>
-                          run(`kick:${p.id}`, () => adminApi.kick(roomId, p.id), "Member kicked")
-                        }
-                      />
-                      <DangerButton
-                        label="Kick + ban"
-                        busyLabel="Banning…"
-                        confirmLabel="Ban?"
-                        busy={working(`ban:${p.id}`)}
-                        onConfirm={() =>
-                          run(
-                            `ban:${p.id}`,
-                            () => adminApi.kick(roomId, p.id, true),
-                            "Member kicked and identity banned",
+                      {p.name.slice(0, 1).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium" style={{ color: avatarColor(p.color) }}>
+                        {p.name}
+                      </div>
+                      <div className="truncate font-mono text-[11px] text-ink-faint">
+                        {shortId(p.id)} · joined {fmtTime(p.joinedAt)}
+                      </div>
+                    </div>
+                    <span className="ml-1 flex shrink-0 gap-1">
+                      {p.id === r.hostId && <Badge tone="accent">host</Badge>}
+                      {p.banned ? <Badge tone="rose">banned</Badge> : <Badge tone="green">in room</Badge>}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    {p.banned ? (
+                      <button
+                        onClick={() =>
+                          void run(
+                            `unban:${p.id}`,
+                            () => adminApi.unbanUser(p.id),
+                            "Identity unbanned",
                           )
                         }
-                      />
-                    </>
-                  )}
+                        disabled={working(`unban:${p.id}`)}
+                        className="rounded-lg border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/10 disabled:opacity-50"
+                      >
+                        {working(`unban:${p.id}`) ? "Unbanning…" : "Unban"}
+                      </button>
+                    ) : (
+                      <>
+                        <DangerButton
+                          label="Kick"
+                          busyLabel="Kicking…"
+                          confirmLabel="Kick?"
+                          busy={working(`kick:${p.id}`)}
+                          onConfirm={() =>
+                            run(`kick:${p.id}`, () => adminApi.kick(roomId, p.id), "Member kicked")
+                          }
+                        />
+                        <DangerButton
+                          label="Kick + ban"
+                          busyLabel="Banning…"
+                          confirmLabel="Ban?"
+                          busy={working(`ban:${p.id}`)}
+                          onConfirm={() =>
+                            run(
+                              `ban:${p.id}`,
+                              () => adminApi.kick(roomId, p.id, true),
+                              "Member kicked and identity banned",
+                            )
+                          }
+                        />
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+            <Pagination
+              page={memberPager.page}
+              pageCount={memberPager.pageCount}
+              total={memberPager.total}
+              pageSize={50}
+              onPage={memberPager.setPage}
+            />
+          </>
         )}
       </Card>
 
@@ -258,37 +272,46 @@ export function AdminRoomDetail({ roomId, onBack }: { roomId: string; onBack: ()
         ) : (messages.data ?? []).length === 0 ? (
           <EmptyState label="No messages in this room." />
         ) : (
-          <div className="max-h-[420px] divide-y divide-base-border overflow-y-auto px-2">
-            {(messages.data ?? []).map((m) => (
-              <div key={m.id} className="flex gap-3 px-2 py-2.5">
-                <div className="mt-0.5 shrink-0 text-[11px] tabular-nums text-ink-faint">
-                  {fmtTime(m.sentAt)}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-medium" style={{ color: avatarColor(m.color) }}>
-                      {m.name}
-                    </span>
-                    <Badge tone="faint" className="capitalize">
-                      {m.kind === "system" ? "system" : (KIND_LABEL[m.attachmentType ?? ""] ?? "text")}
-                    </Badge>
+          <>
+            <div className="divide-y divide-base-border px-2">
+              {messagePager.slice.map((m) => (
+                <div key={m.id} className="flex gap-3 px-2 py-2.5">
+                  <div className="mt-0.5 shrink-0 text-[11px] tabular-nums text-ink-faint">
+                    {fmtTime(m.sentAt)}
                   </div>
-                  {m.attachmentType ? (
-                    <div className="mt-0.5 text-sm text-ink-muted">
-                      {m.attachmentType === "voice"
-                        ? `Voice note${m.attachmentDuration ? ` · ${fmtDuration(m.attachmentDuration)}` : ""}`
-                        : `${m.attachmentName ?? m.attachmentType ?? "Attachment"}`}
-                      {m.text && <span className="text-ink-faint"> — {m.text}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-sm font-medium" style={{ color: avatarColor(m.color) }}>
+                        {m.name}
+                      </span>
+                      <Badge tone="faint" className="capitalize">
+                        {m.kind === "system" ? "system" : (KIND_LABEL[m.attachmentType ?? ""] ?? "text")}
+                      </Badge>
                     </div>
-                  ) : (
-                    <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-ink">
-                      {m.text}
-                    </p>
-                  )}
+                    {m.attachmentType ? (
+                      <div className="mt-0.5 text-sm text-ink-muted">
+                        {m.attachmentType === "voice"
+                          ? `Voice note${m.attachmentDuration ? ` · ${fmtDuration(m.attachmentDuration)}` : ""}`
+                          : `${m.attachmentName ?? m.attachmentType ?? "Attachment"}`}
+                        {m.text && <span className="text-ink-faint"> — {m.text}</span>}
+                      </div>
+                    ) : (
+                      <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-ink">
+                        {m.text}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+            <Pagination
+              page={messagePager.page}
+              pageCount={messagePager.pageCount}
+              total={messagePager.total}
+              pageSize={200}
+              onPage={messagePager.setPage}
+            />
+          </>
         )}
       </Card>
     </div>

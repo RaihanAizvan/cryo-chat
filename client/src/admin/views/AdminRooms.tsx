@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
 import type { AdminRoomSummary } from "@cryo/shared";
 import { adminApi } from "../adminApi";
-import { Badge, Card, EmptyState, ErrorBanner, Spinner } from "../components";
+import { Badge, Card, EmptyState, ErrorBanner, Pagination, Spinner } from "../components";
 import { usePoll } from "../usePoll";
+import { usePagination } from "../usePagination";
 import { fmtDateTime, fmtExpiry, fmtNum, shortId } from "../format";
 import {
   IconArrowRight,
@@ -13,6 +14,7 @@ import {
 } from "../../components/ui/Icon";
 
 const POLL = 6000;
+const PAGE_SIZE = 20;
 
 export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void }) {
   const rooms = usePoll<AdminRoomSummary[]>(
@@ -31,6 +33,9 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
       return r.code.toLowerCase().includes(q) || r.id.toLowerCase().includes(q);
     });
   }, [rooms.data, query, showReserved]);
+
+  const paged = usePagination(filtered, PAGE_SIZE, `${query}|${showReserved}`);
+  const pageRows = paged.slice;
 
   return (
     <div className="flex flex-col gap-4">
@@ -115,7 +120,7 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
                 </tr>
               </thead>
               <tbody className="divide-y divide-base-border">
-                {filtered.map((r: AdminRoomSummary) => (
+                {pageRows.map((r: AdminRoomSummary) => (
                   <tr
                     key={r.id}
                     onClick={() => onOpenRoom(r.id)}
@@ -157,6 +162,13 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={paged.page}
+            pageCount={paged.pageCount}
+            total={paged.total}
+            pageSize={PAGE_SIZE}
+            onPage={paged.setPage}
+          />
         </Card>
       )}
     </div>
