@@ -499,6 +499,8 @@ export function MessageComposer({
         </button>
 
         <button
+          type="button"
+          onClick={submit}
           disabled={!text.trim()}
           aria-label="Send message"
           className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-all active:scale-95 disabled:opacity-30 disabled:active:scale-100"
