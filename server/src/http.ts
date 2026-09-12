@@ -316,19 +316,31 @@ export function createHttpApp(): express.Express {
     }
   });
 
-  // Production static serving of the built client.
-  if (config.clientDist) {
-    const dist = path.resolve(config.clientDist);
-    if (fs.existsSync(dist)) {
-      app.use(express.static(dist));
-      app.get("/r/:roomId", (_req, res) => {
-        res.sendFile(path.join(dist, "index.html"));
-      });
-      app.get("*", (_req, res) => {
-        res.sendFile(path.join(dist, "index.html"));
-      });
-    }
-  }
-
   return app;
+}
+
+/**
+ * Production static serving of the built client. Must run after all API/admin
+ * routes have been mounted so the SPA catch-all doesn't shadow them.
+ */
+export function attachClientStatic(app: express.Express): void {
+  if (!config.clientDist) return;
+  const dist = path.resolve(config.clientDist);
+  if (!fs.existsSync(dist)) return;
+  app.use(express.static(dist));
+  app.get("/r/:roomId", (_req, res) => {
+    res.sendFile(path.join(dist, "index.html"));
+  });
+  app.get("*", (req, res) => {
+    // Never serve index.html for paths that look like a static file (e.g.
+    // /assets/<hash>.js): when express.static misses (stale cached page
+    // referencing a removed asset) the fallback must 404 rather than return
+    // HTML with a JS/CSS request, which corrupts the page in the browser.
+    const last = req.path.split("/").pop() ?? "";
+    if (last.includes(".")) {
+      res.status(404).end();
+      return;
+    }
+    res.sendFile(path.join(dist, "index.html"));
+  });
 }

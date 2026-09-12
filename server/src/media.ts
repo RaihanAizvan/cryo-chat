@@ -11,8 +11,9 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { config } from "./config.js";
 import { destroyRemote } from "./cloudinary.js";
+import { getSettings } from "./settings.js";
+import * as audit from "./audit.js";
 
 export interface StoredMedia {
   id: string;
@@ -104,6 +105,12 @@ export function storeRemoteMedia(input: {
     viewOnce: Boolean(input.viewOnce),
   };
   remoteMedia.set(record.id, record);
+  audit.record({
+    kind: "media:upload",
+    message: `Media uploaded (${record.kind})`,
+    sessionId: record.uploadedBy,
+    detail: record.kind,
+  });
   return record;
 }
 
@@ -115,7 +122,7 @@ export function getRemoteFor(mediaId: string, sessionId: string): RemoteMedia | 
   if (!mediaId) return null;
   const m = remoteMedia.get(mediaId);
   if (!m) return null;
-  if (Date.now() - m.uploadedAt > config.messageTtlMs) {
+  if (Date.now() - m.uploadedAt > getSettings().messageTtlMs) {
     remoteMedia.delete(mediaId);
     void destroyRemote(m.publicId);
     return null;
@@ -143,7 +150,7 @@ export function consumeRemoteViewOnce(
 /** Expire remote records and delete their CDN assets; call from the sweep. */
 export function pruneRemoteMedia(now = Date.now()): void {
   for (const [id, m] of remoteMedia) {
-    if (now - m.uploadedAt > config.messageTtlMs) {
+    if (now - m.uploadedAt > getSettings().messageTtlMs) {
       remoteMedia.delete(id);
       void destroyRemote(m.publicId);
     }
@@ -239,6 +246,12 @@ export function storeMedia(
     viewOnce: Boolean(options.viewOnce),
   };
   media.set(id, record);
+  audit.record({
+    kind: "media:upload",
+    message: `Media uploaded (${record.kind}, ${fmtBytes(record.buffer.length)})`,
+    sessionId: record.uploadedBy,
+    detail: record.kind,
+  });
   return {
     id: record.id,
     mime: record.mime,
@@ -263,7 +276,7 @@ function clampSeconds(value: unknown): number | undefined {
 export function getMedia(id: string): StoredMedia | undefined {
   if (!id) return undefined;
   const m = media.get(id);
-  if (m && Date.now() - m.uploadedAt > config.messageTtlMs) {
+  if (m && Date.now() - m.uploadedAt > getSettings().messageTtlMs) {
     media.delete(id);
     return undefined;
   }
@@ -304,8 +317,26 @@ export function consumeViewOnce(mediaId: string, sessionId: string): StoredMedia
 /** Drop expired uploads; call from the sweep loop. */
 export function pruneMedia(now = Date.now()): void {
   for (const [id, m] of media) {
-    if (now - m.uploadedAt > config.messageTtlMs) media.delete(id);
+    if (now - m.uploadedAt > getSettings().messageTtlMs) media.delete(id);
   }
+}
+
+/** Human-readable byte count for the audit trail. */
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Aggregate media-store sizes for the admin dashboard. */
+export function mediaStats(): { inMemoryFiles: number; inMemoryBytes: number; remoteFiles: number } {
+  let bytes = 0;
+  for (const m of media.values()) bytes += m.buffer.length;
+  return {
+    inMemoryFiles: media.size,
+    inMemoryBytes: bytes,
+    remoteFiles: remoteMedia.size,
+  };
 }
 
 function sanitizeName(name: unknown): string | undefined {

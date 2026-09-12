@@ -17,8 +17,8 @@ import type {
   MessageAttachment,
   MessageReply,
 } from "@cryo/shared";
-import { config } from "./config.js";
 import { randomRoomCode, randomRoomId } from "./util.js";
+import { getSettings, isReservedCode } from "./settings.js";
 
 interface InternalMessage {
   id: string;
@@ -59,14 +59,17 @@ export interface CreateRoomOptions {
 /** Create a new room and return it. The host participant is added by caller. */
 export function createRoom(options: CreateRoomOptions = {}): Room {
   const now = Date.now();
+  const settings = getSettings();
   const id = randomRoomId();
-  const persistent = Boolean(options.code && options.code === config.reservedRoomCode);
+  const persistent = Boolean(
+    options.code && isReservedCode(options.code),
+  );
   const room: Room = {
     id,
     code: options.code ?? randomRoomCode(),
     hostParticipantId: "",
     createdAt: now,
-    expiresAt: persistent ? Number.POSITIVE_INFINITY : now + config.roomTtlMs,
+    expiresAt: persistent ? Number.POSITIVE_INFINITY : now + settings.roomTtlMs,
     persistent,
     participants: new Map(),
     sockets: new Map(),
@@ -75,7 +78,7 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
   // Guard against a (vanishingly rare) id collision.
   while (rooms.has(room.id)) room.id = randomRoomId();
   // A random code must never shadow the preserved reserved code.
-  while (!options.code && room.code === config.reservedRoomCode) {
+  while (!options.code && isReservedCode(room.code)) {
     room.code = randomRoomCode();
   }
   rooms.set(id, room);
@@ -106,12 +109,15 @@ export function getRoomByCode(code: string): Room | undefined {
 /**
  * Return the room for the fixed reserved code, creating it on demand if it was
  * ever swept/expired. Because it is recreated lazily, the code is effectively
- * always available — anyone who knows it can jump back in.
+ * always available — anyone who knows it can jump back in. Returns undefined
+ * when the reserved room is disabled in settings.
  */
-export function getOrCreateReservedRoom(): Room {
-  const existing = getRoomByCode(config.reservedRoomCode);
+export function getOrCreateReservedRoom(): Room | undefined {
+  const settings = getSettings();
+  if (!settings.reservedRoomEnabled) return undefined;
+  const existing = getRoomByCode(settings.reservedRoomCode);
   if (existing) return existing;
-  return createRoom({ code: config.reservedRoomCode });
+  return createRoom({ code: settings.reservedRoomCode });
 }
 
 export function deleteRoom(id: string): boolean {
@@ -129,7 +135,8 @@ export function addParticipant(
   name: string,
   color: number,
 ): Participant | null {
-  if (room.participants.size >= config.maxRoomSize && !room.participants.has(participantId)) {
+  const settings = getSettings();
+  if (room.participants.size >= settings.maxRoomSize && !room.participants.has(participantId)) {
     return null;
   }
   const existing = room.participants.get(participantId);
@@ -262,7 +269,8 @@ function toPublicMessage(message: InternalMessage): PublicMessage {
 
 function storeMessage(room: Room, message: InternalMessage): void {
   room.messages.push(message);
-  const cutoff = Date.now() - config.messageTtlMs;
+  const settings = getSettings();
+  const cutoff = Date.now() - settings.messageTtlMs;
   // Prune from the front while too old — messages are ordered by insertion.
   let firstValid = 0;
   for (let i = 0; i < room.messages.length; i++) {
@@ -274,8 +282,8 @@ function storeMessage(room: Room, message: InternalMessage): void {
   }
   if (firstValid > 0) room.messages.splice(0, firstValid);
   // Hard cap on retained messages (rolling window: newest kept).
-  if (room.messages.length > config.messageCap) {
-    room.messages.splice(0, room.messages.length - config.messageCap);
+  if (room.messages.length > settings.messageCap) {
+    room.messages.splice(0, room.messages.length - settings.messageCap);
   }
 }
 

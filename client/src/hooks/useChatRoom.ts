@@ -219,6 +219,20 @@ export function useChatRoom(): [RoomState, RoomActions] {
           : "This room was closed. It can be reopened anytime with the same code.",
       });
     };
+    // Admin moderation: the room removed us specifically (kick), optionally
+    // with a reason. Leaving the room is done server-side; just surface it.
+    const onKicked = (data: { code?: string; reason?: string }) => {
+      const reason = data.reason?.trim();
+      exitRoom();
+      setAlert({
+        title: "You were removed from the room.",
+        message: reason
+          ? reason
+          : data.code
+            ? `A moderator removed you from room ${data.code}.`
+            : "A moderator removed you from this room.",
+      });
+    };
     // Ride out brief backgrounding drops: the server restores the room itself.
     // Only when the drop outlasted the server's recovery window do we need an
     // explicit re-join (fresh membership + history).
@@ -267,6 +281,9 @@ export function useChatRoom(): [RoomState, RoomActions] {
         case "room_expired":
           setJoinError("That room has expired.");
           break;
+        case "banned":
+          setJoinError("This identity has been banned.");
+          break;
         case "name_invalid":
         case "message_invalid":
         case "rate_limited":
@@ -287,6 +304,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
     socket.on("message:cleared", onCleared);
     socket.on("room:expired", onExpired);
     socket.on("room:closed", onClosed);
+    socket.on("room:kicked", onKicked);
     socket.on("connect", onConnect);
     socket.on("error", onError);
 
@@ -302,6 +320,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       socket.off("message:cleared", onCleared);
       socket.off("room:expired", onExpired);
       socket.off("room:closed", onClosed);
+      socket.off("room:kicked", onKicked);
       socket.off("connect", onConnect);
       socket.off("error", onError);
     };

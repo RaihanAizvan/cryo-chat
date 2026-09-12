@@ -8,17 +8,20 @@
  */
 
 import type { Server, Socket } from "socket.io";
-import type { ErrorPayload, MessageAttachment, MessageReply, RoomRef } from "@cryo/shared";
+import type { ErrorPayload, MessageAttachment, MessageReply, Participant, RoomRef } from "@cryo/shared";
 import { config } from "./config.js";
 import { getSession, updateName } from "./sessions.js";
 import * as rooms from "./rooms.js";
 import * as media from "./media.js";
+import * as audit from "./audit.js";
 import { normalizeMessage, normalizeCaption, RateLimiter } from "./validation.js";
 import { normalizeCode } from "./util.js";
+import { getSettings, isReservedCode } from "./settings.js";
+import { isBanned } from "./bans.js";
 
 const messageLimiter = new RateLimiter(
-  config.messageRateLimit,
-  config.messageRateWindowMs,
+  () => getSettings().messageRateLimit,
+  () => getSettings().messageRateWindowMs,
 );
 
 /** Internal participant nonce bound to a socket within a room. */
@@ -98,6 +101,8 @@ export function attachHandlers(io: Server, socket: Socket): void {
   });
 
   socket.on("session:name", (raw) => {
+    const session = getSession(socket);
+    const prevName = session.name;
     const updated = updateName(socket, raw?.name);
     if (!updated) {
       sendError(socket, { code: "name_invalid", message: "That name isn't allowed." });
@@ -114,6 +119,16 @@ export function attachHandlers(io: Server, socket: Socket): void {
           participantId: p.id,
           name: p.name,
         });
+        if (p.name !== prevName) {
+          audit.record({
+            kind: "session:renamed",
+            message: `${prevName} renamed to ${p.name}`,
+            actor: p.name,
+            sessionId: session.id,
+            roomId: membership.room.id,
+            roomCode: membership.room.code,
+          });
+        }
       }
     }
   });
@@ -134,6 +149,14 @@ export function attachHandlers(io: Server, socket: Socket): void {
     const room = rooms.createRoom(wanted ? { code: wanted } : {});
     if (!joinInternal(io, socket, room)) return;
     socket.emit("room:created", { roomId: room.id, code: room.code });
+    audit.record({
+      kind: "room:created",
+      message: `Room ${room.code} created` + (room.persistent ? " (reserved)" : ""),
+      actor: getSession(socket).name,
+      sessionId: getSession(socket).id,
+      roomId: room.id,
+      roomCode: room.code,
+    });
     emitJoined(io, socket, room);
   });
 
@@ -144,7 +167,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
     // The reserved code always works — recreate the room on demand.
     const room = roomId
       ? rooms.getRoom(roomId)
-      : code === config.reservedRoomCode
+      : code && isReservedCode(code)
         ? rooms.getOrCreateReservedRoom()
         : code
           ? rooms.getRoomByCode(code)
@@ -191,7 +214,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
         // room re-creation, while a saved roomId can go stale (e.g. 9999 after
         // it is recreated). Falling back to the id covers deep-link refs.
         const room = code
-          ? code === config.reservedRoomCode
+          ? isReservedCode(code)
             ? rooms.getOrCreateReservedRoom()
             : rooms.getRoomByCode(code)
           : roomId
@@ -309,6 +332,17 @@ export function attachHandlers(io: Server, socket: Socket): void {
       replyTo,
     );
     io.to(membership.room.id).emit("message:new", { message });
+    audit.record({
+      kind: "message:send",
+      message: attachment
+        ? `${participant.name} sent ${attachment.type}${text ? " with a caption" : ""}`
+        : `${participant.name} sent a message`,
+      actor: participant.name,
+      sessionId: participant.id,
+      roomId: membership.room.id,
+      roomCode: membership.room.code,
+      detail: attachment?.type ?? "text",
+    });
   });
 
   // Typing indicator: relay to other room members (no server storage).
@@ -352,6 +386,14 @@ export function attachHandlers(io: Server, socket: Socket): void {
     const system = rooms.addSystemMessage(membership.room, `${name} cleared the chat`);
     io.to(membership.room.id).emit("message:cleared", {});
     io.to(membership.room.id).emit("message:new", { message: system });
+    audit.record({
+      kind: "room:cleared",
+      message: `${name} cleared the chat in ${membership.room.code}`,
+      actor: name,
+      sessionId: getSession(socket).id,
+      roomId: membership.room.id,
+      roomCode: membership.room.code,
+    });
   });
 
   // Rename any participant in a room.
@@ -367,6 +409,14 @@ export function attachHandlers(io: Server, socket: Socket): void {
       io.to(membership.room.id).emit("presence:renamed", {
         participantId: p.id,
         name: p.name,
+      });
+      audit.record({
+        kind: "room:renamed",
+        message: `${p.name} was renamed to ${newName} by ${getSession(socket).name}`,
+        actor: getSession(socket).name,
+        sessionId: getSession(socket).id,
+        roomId: membership.room.id,
+        roomCode: membership.room.code,
       });
     }
   });
@@ -385,6 +435,11 @@ function joinInternal(
   room: rooms.Room,
 ): boolean {
   const session = getSession(socket);
+  // Banned identities are refused at the door (they also can't resume).
+  if (isBanned(session.id)) {
+    sendError(socket, { code: "banned", message: "You're not allowed in this chat." });
+    return false;
+  }
   // A fresh join means the participant is back — cancel any pending departure.
   cancelDeparture(room.id, session.id);
   // If the socket is already in another room, leave it first.
@@ -420,6 +475,14 @@ function emitJoined(io: Server, socket: Socket, room: rooms.Room): void {
         status: "online",
       },
     });
+    audit.record({
+      kind: "room:joined",
+      message: `${participant.name} joined ${room.code}`,
+      actor: participant.name,
+      sessionId: participant.id,
+      roomId: room.id,
+      roomCode: room.code,
+    });
     // Share this participant's read position with everyone so senders can
     // show read receipts immediately, and broadcast other positions to us.
     if (participant.lastSeenMessageId) {
@@ -448,6 +511,14 @@ function leaveRoom(io: Server, socket: Socket, room: rooms.Room): void {
     const system = rooms.addSystemMessage(room, `${participant.name} left`);
     io.to(room.id).emit("message:new", { message: system });
     io.to(room.id).emit("presence:left", { participantId: participant.id });
+    audit.record({
+      kind: "room:left",
+      message: `${participant.name} left ${room.code}`,
+      actor: participant.name,
+      sessionId: participant.id,
+      roomId: room.id,
+      roomCode: room.code,
+    });
   }
   // A room's lifetime is fixed at creation (roomTtlMs). Leaving does NOT pull
   // the expiry forward — otherwise an empty room's countdown would jump down,
@@ -455,14 +526,65 @@ function leaveRoom(io: Server, socket: Socket, room: rooms.Room): void {
   // room never expires, so nothing happens here for it.
 }
 
+/**
+ * Remove a member by participant id (admin moderation). Unlike a normal leave,
+ * the affected socket gets an explicit `room:kicked` notice first. Works even
+ * when the socket is in the disconnect-grace window (no live Socket object).
+ * Returns the removed participant, or null when the id isn't in the room.
+ */
+export function adminRemoveMember(
+  io: Server,
+  room: rooms.Room,
+  participantId: string,
+  reason?: string,
+): Participant | null {
+  let socketId = "";
+  for (const [sid, pid] of room.sockets) {
+    if (pid === participantId) {
+      socketId = sid;
+      break;
+    }
+  }
+  if (!socketId) return null;
+  const liveSocket = io.sockets.sockets.get(socketId);
+  const { participant } = rooms.removeParticipant(room, socketId);
+  if (!participant) return null;
+  cancelDeparture(room.id, participant.id);
+  if (liveSocket) {
+    ROOM_MEMBERSHIP.delete(liveSocket);
+    liveSocket.leave(room.id);
+    liveSocket.emit("room:kicked", { roomId: room.id, reason: reason ?? "You were removed from the room by an admin." });
+  }
+  const system = rooms.addSystemMessage(room, `${participant.name} was removed`);
+  io.to(room.id).emit("message:new", { message: system });
+  io.to(room.id).emit("presence:left", { participantId: participant.id });
+  audit.record({
+    kind: "member:kicked",
+    message: `${participant.name} was removed from ${room.code}${reason ? ` (${reason})` : ""}`,
+    actor: "admin",
+    sessionId: participant.id,
+    roomId: room.id,
+    roomCode: room.code,
+    detail: reason,
+  });
+  return participant;
+}
+
 /** Close a room: kick everyone, announce it, and destroy it. */
-function closeRoom(io: Server, room: rooms.Room): void {
+export function closeRoom(io: Server, room: rooms.Room): void {
   io.to(room.id).emit("room:closed", { roomId: room.id });
   cancelDeparturesForRoom(room.id);
   for (const sid of room.sockets.keys()) {
     const s = io.sockets.sockets.get(sid);
     if (s) ROOM_MEMBERSHIP.delete(s);
   }
+  audit.record({
+    kind: "room:closed",
+    message: `Room ${room.code} was closed`,
+    actor: "admin",
+    roomId: room.id,
+    roomCode: room.code,
+  });
   rooms.deleteRoom(room.id);
 }
 
@@ -481,6 +603,12 @@ export function startSweeper(io: Server): NodeJS.Timeout {
           const s = io.sockets.sockets.get(sid);
           if (s) ROOM_MEMBERSHIP.delete(s);
         }
+        audit.record({
+          kind: "room:expired",
+          message: `Room ${room.code} expired`,
+          roomId: room.id,
+          roomCode: room.code,
+        });
         rooms.deleteRoom(room.id);
       }
     }

@@ -212,7 +212,109 @@ export const IconMic = (p: P) => (
 );
 
 export const IconSquare = (p: P) => (
-  <svg {...base} {...p} fill="currentColor" stroke="none">
-    <rect x="5" y="5" width="14" height="14" rx="2" />
+  <svg {...base} {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+  </svg>
+);
+
+export const IconGrid = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </svg>
+);
+
+export const IconShield = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M12 2 4 5.5v5.2c0 4.7 3.4 8.6 8 10.3 4.6-1.7 8-5.6 8-10.3V5.5L12 2Z" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+);
+
+export const IconBan = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m5.6 5.6 12.8 12.8" />
+  </svg>
+);
+
+export const IconGear = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1" />
+  </svg>
+);
+
+export const IconFileText = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 2v6h6" />
+    <path d="M8 13h8M8 17h5" />
+  </svg>
+);
+
+export const IconChart = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M3 3v18h18" />
+    <path d="M7 15v-4M12 15V7M17 15v-7" />
+  </svg>
+);
+
+export const IconLock = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="11" width="16" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+);
+
+export const IconLogOut = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="m16 17 5-5-5-5" />
+    <path d="M21 12H9" />
+  </svg>
+);
+
+export const IconRefresh = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+    <path d="M21 3v6h-6" />
+  </svg>
+);
+
+export const IconActivity = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M22 12h-4l-3 8L9 4l-3 8H2" />
+  </svg>
+);
+
+export const IconUserPlus = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M19 8v6M22 11h-6" />
+  </svg>
+);
+
+export const IconBroadcast = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="2.2" />
+    <path d="M8.6 15.4a5 5 0 0 1 0-6.8M15.4 8.6a5 5 0 0 1 0 6.8" />
+    <path d="M5.8 18.2a9 9 0 0 1 0-12.4M18.2 5.8a9 9 0 0 1 0 12.4" />
+  </svg>
+);
+
+export const IconPause = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+
+export const IconFilter = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M4 6h16M7 12h10M10 18h4" />
   </svg>
 );

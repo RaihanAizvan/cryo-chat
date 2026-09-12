@@ -4,6 +4,7 @@ import { LandingScreen } from "./components/landing/LandingScreen";
 import { ChatRoom } from "./components/chat/ChatRoom";
 import { Modal } from "./components/ui/Modal";
 import { IconAlertTriangle } from "./components/ui/Icon";
+import { AdminApp } from "./admin/AdminApp";
 
 /**
  * Pull a room target from the URL:
@@ -19,6 +20,19 @@ function deepLinkTarget(): { code: string } | { roomId: string } | null {
 }
 
 export function App() {
+  // The /admin route renders the admin console instead of the chat app.
+  return window.location.pathname.startsWith("/admin") ? <AdminRoute /> : <ChatApp />;
+}
+
+function AdminRoute() {
+  return (
+    <div className="mx-auto min-h-full bg-base text-ink">
+      <AdminApp />
+    </div>
+  );
+}
+
+function ChatApp() {
   const [state, actions] = useChatRoom();
   const autoJoined = useRef(false);
 
