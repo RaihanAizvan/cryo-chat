@@ -4,13 +4,14 @@
  */
 
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
+import { maxMessageLength } from "./settings.js";
 
 /** Normalize + validate a chat message. Returns null if invalid. */
 export function normalizeMessage(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (text.trim().length === 0) return null;
-  if (text.length > MAX_MESSAGE_LENGTH) return null;
+  if (text.length > maxMessageLength()) return null;
   // Reject control characters (but allow newline and tab).
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return null;
   return text;
@@ -27,7 +28,8 @@ export function normalizeCaption(raw: unknown): string {
   if (text.trim().length === 0) return "";
   // Reject control characters (but allow newline and tab).
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return "";
-  if (text.length > MAX_MESSAGE_LENGTH) return text.slice(0, MAX_MESSAGE_LENGTH);
+  const cap = maxMessageLength();
+  if (text.length > cap) return text.slice(0, cap);
   return text.trim();
 }
 
@@ -36,13 +38,16 @@ interface Bucket {
   resetAt: number;
 }
 
-/** Tiny fixed-window rate limiter keyed by socket id. */
+/**
+ * Tiny fixed-window rate limiter keyed by socket id. Limits/windows are read
+ * live from the current settings so admin changes apply immediately.
+ */
 export class RateLimiter {
   private buckets = new Map<string, Bucket>();
 
   constructor(
-    private readonly limit: number,
-    private readonly windowMs: number,
+    private readonly getLimit: () => number,
+    private readonly getWindowMs: () => number,
   ) {}
 
   /**
@@ -51,12 +56,14 @@ export class RateLimiter {
    */
   allow(key: string): boolean {
     const now = Date.now();
+    const limit = this.getLimit();
+    const windowMs = this.getWindowMs();
     const bucket = this.buckets.get(key);
     if (!bucket || now >= bucket.resetAt) {
-      this.buckets.set(key, { count: 1, resetAt: now + this.windowMs });
+      this.buckets.set(key, { count: 1, resetAt: now + windowMs });
       return true;
     }
-    if (bucket.count >= this.limit) {
+    if (bucket.count >= limit) {
       return false;
     }
     bucket.count += 1;

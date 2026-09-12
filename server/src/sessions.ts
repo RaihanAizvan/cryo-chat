@@ -15,6 +15,8 @@
 import { randomUUID } from "node:crypto";
 import type { Socket } from "socket.io";
 import { normalizeName, randomDisplayName, colorFor } from "./util.js";
+import * as audit from "./audit.js";
+import { isBanned } from "./bans.js";
 
 export interface Session {
   id: string;
@@ -47,7 +49,11 @@ export function getSession(socket: Socket, requestedId?: unknown): Session {
   if (cached) return cached;
 
   const wantId = typeof requestedId === "string" ? requestedId : undefined;
-  const resumed = wantId && UUID_RE.test(wantId) ? identities.get(wantId) : undefined;
+  // Banned identities can't be resumed — the client silently gets a fresh one.
+  const resumed =
+    wantId && UUID_RE.test(wantId) && !isBanned(wantId)
+      ? identities.get(wantId)
+      : undefined;
   if (resumed) {
     sessions.set(socket.id, resumed);
     return resumed;
@@ -63,6 +69,12 @@ export function getSession(socket: Socket, requestedId?: unknown): Session {
   identities.set(session.id, session);
   sessions.set(socket.id, session);
   pruneIdentities();
+  audit.record({
+    kind: "session:created",
+    message: `Session created for ${session.name}`,
+    actor: session.name,
+    sessionId: session.id,
+  });
   return session;
 }
 
@@ -89,4 +101,25 @@ function pruneIdentities(): void {
       identities.delete(id);
     }
   }
+}
+
+/** All issued identities (admin user list). */
+export function allIdentities(): Session[] {
+  return [...identities.values()];
+}
+
+/** Look up an issued identity by id without resuming/allocating anything. */
+export function identityById(id: string): Session | undefined {
+  return UUID_RE.test(id) ? identities.get(id) : undefined;
+}
+
+/** Active socket->session bindings (admin "online" view). */
+export function allBindings(): Map<Socket["id"], Session> {
+  return new Map(sessions);
+}
+
+/** Drop a stored identity entirely (admin user purge — disables resume). */
+export function deleteIdentity(id: string): boolean {
+  if (!UUID_RE.test(id)) return false;
+  return identities.delete(id);
 }
