@@ -77,6 +77,8 @@ export interface ServerToClientEventMap {
   "room:expired": { roomId: string };
   /** Room was closed (manually) while the client was inside it. */
   "room:closed": { roomId: string };
+  /** The client's participant was removed from the room by an admin/moderator. */
+  "room:kicked": { roomId: string; reason?: string };
   /** Current status for the requested rooms (home screen). */
   "room:status:result": { statuses: RoomStatus[] };
 }
@@ -90,7 +92,8 @@ export type ErrorCode =
   | "name_invalid"
   | "message_invalid"
   | "rate_limited"
-  | "not_in_room";
+  | "not_in_room"
+  | "banned";
 
 export interface ErrorPayload {
   code: ErrorCode;
@@ -237,3 +240,142 @@ export interface PublicRoom {
   /** True for the special preserved room: never auto-expires, closed manually. */
   persistent: boolean;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin console
+// These shapes are used by the built-in /admin SPA over the admin HTTP API
+// (X-Admin-Key header). They are intentionally NOT part of the Socket.IO
+// protocol — admins are read-only observers of the same in-memory data.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Room row shown in the admin room list. */
+export interface AdminRoomSummary {
+  id: string;
+  code: string;
+  createdAt: number;
+  expiresAt: number;
+  persistent: boolean;
+  hostId: string;
+  participantCount: number;
+  messageCount: number;
+}
+
+/** Full room inspection: members + message log. */
+export interface AdminRoomDetail extends AdminRoomSummary {
+  participants: Participant[];
+  messages: AdminMessage[];
+}
+
+/** Scrub of a stored message for the admin log (attachments summarized). */
+export interface AdminMessage {
+  id: string;
+  participantId: string;
+  name: string;
+  color: AvatarColor;
+  sentAt: number;
+  kind: MessageKind;
+  text: string;
+  attachmentType?: MessageAttachment["type"];
+  attachmentName?: string;
+  attachmentDuration?: number;
+}
+
+/** One issued anonymous identity. */
+export interface AdminUser {
+  sessionId: string;
+  name: string;
+  color: AvatarColor;
+  createdAt: number;
+  online: boolean;
+  roomId?: string;
+  roomCode?: string;
+  banned: boolean;
+  messages: number;
+  uploads: number;
+  lastActiveAt?: number;
+}
+
+/** Categories recorded in the audit trail. */
+export type AdminAuditKind =
+  | "session:created"
+  | "session:renamed"
+  | "session:banned"
+  | "session:unbanned"
+  | "room:created"
+  | "room:joined"
+  | "room:left"
+  | "room:expired"
+  | "room:closed"
+  | "room:cleared"
+  | "room:renamed"
+  | "message:send"
+  | "media:upload"
+  | "member:kicked"
+  | "member:banned"
+  | "settings:update";
+
+/** One entry of the admin audit trail. */
+export interface AdminAuditEvent {
+  id: string;
+  ts: number;
+  kind: AdminAuditKind;
+  /** Human-readable summary. */
+  message: string;
+  /** Name of the acting identity, when relevant (e.g. "Coral Wren"). */
+  actor?: string;
+  roomId?: string;
+  roomCode?: string;
+  sessionId?: string;
+  detail?: string;
+}
+
+/** Runtime-tunable server settings (admin panel). */
+export interface AdminSettings {
+  maxMessageLength: number;
+  maxRoomSize: number;
+  roomTtlMinutes: number;
+  messageTtlMinutes: number;
+  messageCap: number;
+  maxSocketsPerIp: number;
+  messageRateLimit: number;
+  messageRateWindowSeconds: number;
+  reservedRoomCode: string;
+  reservedRoomEnabled: boolean;
+  adminEnabled: boolean;
+}
+
+/** Live summary numbers for the dashboard. */
+export interface AdminStats {
+  liveRooms: number;
+  onlineParticipants: number;
+  /** All participants seated across live rooms (includes grace-period tails). */
+  totalParticipants: number;
+  totalSessions: number;
+  totalMessages: number;
+  totalUploads: number;
+  mediaBytes: number;
+  mediaFiles: number;
+  bannedSessions: number;
+  uptimeSeconds: number;
+  memoryMb: number;
+}
+
+/** Time-series bucket + message-type split + busiest rooms for analytics. */
+export interface AdminSeriesBucket {
+  ts: number;
+  messages: number;
+  joins: number;
+  leaves: number;
+  uploads: number;
+}
+
+export interface AdminAnalytics {
+  buckets: AdminSeriesBucket[];
+  splits: { text: number; image: number; gif: number; sticker: number; voice: number };
+  topRooms: { roomId: string; code: string; count: number }[];
+}
+
+/** Shapes accepted for settings updates (partial allowed). */
+export type AdminSettingsPatch = Partial<
+  Omit<AdminSettings, "adminEnabled">
+>;
