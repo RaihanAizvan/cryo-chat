@@ -1,12 +1,14 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import type { AdminAuditEvent, AdminAuditKind } from "@cryo/shared";
 import { adminApi } from "../adminApi";
-import { Badge, Card, EmptyState, ErrorBanner, Spinner } from "../components";
+import { Badge, Card, EmptyState, ErrorBanner, Pagination, Spinner } from "../components";
 import { usePoll } from "../usePoll";
+import { usePagination } from "../usePagination";
 import { fmtTime } from "../format";
 import { IconPause, IconPlayFilled, IconRefresh } from "../../components/ui/Icon";
 
 const POLL = 4500;
+const PAGE_SIZE = 100;
 
 const AUDIT_KINDS: AdminAuditKind[] = [
   "session:created",
@@ -67,7 +69,10 @@ export function AdminAudit() {
     });
   };
 
-  const visible = useMemo(() => (events.data ?? []).slice(0, 400), [events.data]);
+  const filterKey = [...activeKinds].sort().join(",") || "all";
+  const paged = usePagination(events.data ?? [], PAGE_SIZE, `${filterKey}|${paused}`);
+
+  const visible = paged.slice;
 
   const tone = (k: AdminAuditKind): "default" | "green" | "amber" | "rose" | "faint" | "accent" =>
     (KIND_TONE[k] as "default" | "green" | "amber" | "rose" | "faint" | "accent") ?? "default";
@@ -134,38 +139,45 @@ export function AdminAudit() {
       ) : visible.length === 0 ? (
         <EmptyState label="No matching events yet." />
       ) : (
-        <Card className="overflow-hidden">
-          <div className="divide-y divide-base-border">
-            {visible.map((e) => (
-              <div key={e.id} className="flex gap-3 px-3 py-2.5">
-                <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-ink-faint">
-                  {fmtTime(e.ts)}
-                </span>
-                <span className="flex shrink-0 items-center justify-center py-0.5">
-                  <Badge tone={tone(e.kind)}>{e.kind}</Badge>
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-ink">
-                    {e.message}
-                    {e.actor && (
-                      <span className="text-ink-faint"> · <span className="text-ink-muted">{e.actor}</span></span>
+<Card className="overflow-hidden">
+            <div className="divide-y divide-base-border">
+              {visible.map((e) => (
+                <div key={e.id} className="flex gap-3 px-3 py-2.5">
+                  <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-ink-faint">
+                    {fmtTime(e.ts)}
+                  </span>
+                  <span className="flex shrink-0 items-center justify-center py-0.5">
+                    <Badge tone={tone(e.kind)}>{e.kind}</Badge>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-ink">
+                      {e.message}
+                      {e.actor && (
+                        <span className="text-ink-faint"> · <span className="text-ink-muted">{e.actor}</span></span>
+                      )}
+                      {e.roomCode && (
+                        <span className="ml-2 inline-block">
+                          <Badge tone="faint" className="font-mono">
+                            {e.roomCode}
+                          </Badge>
+                        </span>
+                      )}
+                    </p>
+                    {e.detail && (
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-ink-faint">{e.detail}</p>
                     )}
-                    {e.roomCode && (
-                      <span className="ml-2 inline-block">
-                        <Badge tone="faint" className="font-mono">
-                          {e.roomCode}
-                        </Badge>
-                      </span>
-                    )}
-                  </p>
-                  {e.detail && (
-                    <p className="mt-0.5 truncate font-mono text-[11px] text-ink-faint">{e.detail}</p>
-                  )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </Card>
+              ))}
+            </div>
+            <Pagination
+              page={paged.page}
+              pageCount={paged.pageCount}
+              total={paged.total}
+              pageSize={PAGE_SIZE}
+              onPage={paged.setPage}
+            />
+          </Card>
       )}
     </div>
   );

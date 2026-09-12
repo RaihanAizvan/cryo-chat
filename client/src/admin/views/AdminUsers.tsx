@@ -2,12 +2,14 @@ import { useCallback, useMemo, useState } from "react";
 import type { AdminUser } from "@cryo/shared";
 import { avatarColor } from "@cryo/shared";
 import { adminApi } from "../adminApi";
-import { Badge, Card, DangerButton, EmptyState, ErrorBanner, Spinner } from "../components";
+import { Badge, Card, DangerButton, EmptyState, ErrorBanner, Pagination, Spinner } from "../components";
 import { usePoll } from "../usePoll";
+import { usePagination } from "../usePagination";
 import { fmtDateTime, fmtNum, fmtRelative, shortId } from "../format";
 import { IconRefresh, IconSearch } from "../../components/ui/Icon";
 
 const POLL = 6000;
+const PAGE_SIZE = 20;
 
 export function AdminUsers({ onOpenRoom }: { onOpenRoom: (id: string) => void }) {
   const users = usePoll<AdminUser[]>(
@@ -26,6 +28,9 @@ export function AdminUsers({ onOpenRoom }: { onOpenRoom: (id: string) => void })
       return u.name.toLowerCase().includes(q) || u.sessionId.toLowerCase().includes(q);
     });
   }, [users.data, query, onlyBanned]);
+
+  const paged = usePagination(filtered, PAGE_SIZE, `${query}|${onlyBanned}`);
+  const pageRows = paged.slice;
 
   const toggleBan = async (u: AdminUser) => {
     const key = `ban:${u.sessionId}`;
@@ -125,7 +130,7 @@ export function AdminUsers({ onOpenRoom }: { onOpenRoom: (id: string) => void })
                 </tr>
               </thead>
               <tbody className="divide-y divide-base-border">
-                {filtered.map((u: AdminUser) => (
+                {pageRows.map((u: AdminUser) => (
                   <tr key={u.sessionId} className="transition-colors hover:bg-base-sunken/40">
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
@@ -211,6 +216,13 @@ export function AdminUsers({ onOpenRoom }: { onOpenRoom: (id: string) => void })
               </tbody>
             </table>
           </div>
+          <Pagination
+            page={paged.page}
+            pageCount={paged.pageCount}
+            total={paged.total}
+            pageSize={PAGE_SIZE}
+            onPage={paged.setPage}
+          />
         </Card>
       )}
     </div>
