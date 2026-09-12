@@ -194,3 +194,25 @@ export const IconPlayFilled = (p: P) => (
     <path d="m8 5 14 7-14 7Z" />
   </svg>
 );
+
+export const IconPauseFilled = (p: P) => (
+  <svg {...base} {...p} fill="currentColor" stroke="none">
+    <rect x="6" y="4" width="4" height="16" rx="1" />
+    <rect x="14" y="4" width="4" height="16" rx="1" />
+  </svg>
+);
+
+export const IconMic = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="9" y="2" width="6" height="12" rx="3" />
+    <path d="M5 10a7 7 0 0 0 14 0" />
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <line x1="8" y1="22" x2="16" y2="22" />
+  </svg>
+);
+
+export const IconSquare = (p: P) => (
+  <svg {...base} {...p} fill="currentColor" stroke="none">
+    <rect x="5" y="5" width="14" height="14" rx="2" />
+  </svg>
+);

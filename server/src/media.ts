@@ -18,10 +18,14 @@ export interface StoredMedia {
   id: string;
   buffer: Buffer;
   mime: string;
-  /** "image" for stills, "gif" for animated gifs, "sticker" for stickers. */
-  kind: "image" | "gif" | "sticker";
-  width: number;
-  height: number;
+  /** "image" for stills, "gif" for animated gifs, "sticker" for stickers,
+   *  "voice" for audio notes. */
+  kind: "image" | "gif" | "sticker" | "voice";
+  /** Pixel dimensions for images/animations; undefined for audio. */
+  width?: number;
+  height?: number;
+  /** Length of a voice note in seconds. */
+  duration?: number;
   name?: string;
   uploadedAt: number;
   uploadedBy: string;
@@ -152,6 +156,12 @@ const ACCEPTED_MIME = new Set([
   "image/png",
   "image/webp",
   "image/gif",
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/aac",
+  "audio/wav",
 ]);
 
 export const MAX_MEDIA_BYTES = 32 * 1024 * 1024; // 32 MB
@@ -186,13 +196,15 @@ export function storeMedia(
   buffer: Buffer,
   mime: string,
   uploaderSessionId: string,
-  options: { viewOnce?: boolean; name?: string; kind?: "sticker" } = {},
+  options: { viewOnce?: boolean; name?: string; kind?: "sticker" | "voice"; duration?: number } = {},
 ): Omit<StoredMedia, "buffer"> | null {
   if (buffer.length < MIN_MEDIA_BYTES || buffer.length > MAX_MEDIA_BYTES) return null;
   if (!ACCEPTED_MIME.has(mime)) return null;
 
-  const dims = readDimensions(buffer);
-  if (!dims) return null;
+  // Audio (voice notes) has no pixels — skip the image signature check.
+  const isAudio = mime.startsWith("audio/");
+  const dims = isAudio ? null : readDimensions(buffer);
+  if (!isAudio && !dims) return null;
   const id = randomBytes(12).toString("hex");
 
   let total = buffer.length;
@@ -207,15 +219,19 @@ export function storeMedia(
     id,
     buffer,
     mime,
-    // Stickers are square by intent; otherwise classify from mime.
+    // Stickers are square by intent; voice notes come from the recorder; the
+    // rest classify from mime.
     kind:
-      options.kind === "sticker"
-        ? "sticker"
-        : mime === "image/gif"
-          ? "gif"
-          : "image",
-    width: dims.width,
-    height: dims.height,
+      options.kind === "voice" || options.kind === "sticker"
+        ? options.kind
+        : isAudio
+          ? "voice"
+          : mime === "image/gif"
+            ? "gif"
+            : "image",
+    width: dims?.width,
+    height: dims?.height,
+    duration: isAudio ? clampSeconds(options.duration) : undefined,
     // Strip paths, control chars and clamp length for the stored name.
     name: sanitizeName(options.name),
     uploadedAt: Date.now(),
@@ -229,11 +245,19 @@ export function storeMedia(
     kind: record.kind,
     width: record.width,
     height: record.height,
+    duration: record.duration,
     name: record.name,
     uploadedAt: record.uploadedAt,
     uploadedBy: record.uploadedBy,
     viewOnce: record.viewOnce,
   };
+}
+
+/** Voice-note length guard: sane range from a client-supplied number. */
+function clampSeconds(value: unknown): number | undefined {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(600, Math.max(1, Math.round(n)));
 }
 
 export function getMedia(id: string): StoredMedia | undefined {

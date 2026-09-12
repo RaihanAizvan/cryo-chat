@@ -6,6 +6,7 @@ const TYPE_LABEL: Record<string, string> = {
   image: "Photo",
   gif: "GIF",
   sticker: "Sticker",
+  voice: "Voice note",
 };
 
 interface Props {
@@ -18,7 +19,7 @@ interface Props {
 
 /** WhatsApp-style quote block shown above the bubble of a replying message. */
 export function ReplyQuote({ reply, mine, onTap }: Props) {
-  const hasThumb = Boolean(reply.attachment?.mediaId) && !reply.viewOnce;
+  const hasThumb = Boolean(reply.attachment?.mediaId) && !reply.viewOnce && reply.attachment?.type !== "voice";
   const label = reply.viewOnce
     ? "One-time media"
     : reply.attachment

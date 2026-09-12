@@ -244,6 +244,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
         width: m.width,
         height: m.height,
         name: m.name,
+        duration: m.duration,
       };
     }
 
