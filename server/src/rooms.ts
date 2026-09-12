@@ -15,6 +15,7 @@ import type {
   PublicRoom,
   MessageKind,
   MessageAttachment,
+  MessageReply,
 } from "@cryo/shared";
 import { config } from "./config.js";
 import { randomRoomCode, randomRoomId } from "./util.js";
@@ -30,6 +31,7 @@ interface InternalMessage {
   _roomId: string;
   clientId?: string;
   attachment?: MessageAttachment;
+  replyTo?: MessageReply;
 }
 
 export interface Room {
@@ -205,6 +207,7 @@ export function addMessage(
   text: string,
   clientId?: string,
   attachment?: MessageAttachment,
+  replyTo?: MessageReply,
 ): PublicMessage {
   const now = Date.now();
   const message: InternalMessage = {
@@ -218,6 +221,7 @@ export function addMessage(
     _roomId: room.id,
     clientId,
     attachment,
+    replyTo,
   };
   storeMessage(room, message);
   return toPublicMessage(message);
@@ -252,6 +256,7 @@ function toPublicMessage(message: InternalMessage): PublicMessage {
     kind: message.kind,
     clientId: message.clientId,
     attachment: message.attachment,
+    replyTo: message.replyTo,
   };
 }
 

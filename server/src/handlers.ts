@@ -8,7 +8,7 @@
  */
 
 import type { Server, Socket } from "socket.io";
-import type { ErrorPayload, MessageAttachment, RoomRef } from "@cryo/shared";
+import type { ErrorPayload, MessageAttachment, MessageReply, RoomRef } from "@cryo/shared";
 import { config } from "./config.js";
 import { getSession, updateName } from "./sessions.js";
 import * as rooms from "./rooms.js";
@@ -269,12 +269,44 @@ export function attachHandlers(io: Server, socket: Socket): void {
     }
     const participant = rooms.participantForSocket(membership.room, socket.id);
     if (!participant) return;
+
+    // Resolve the quoted message server-side: never trust client-supplied reply
+    // content. If the target isn't a real user message in this room (e.g. the
+    // sender replied to a not-yet-echoed local bubble), the quote is dropped
+    // and the message is still delivered.
+    let replyTo: MessageReply | undefined;
+    const replyTargetId = typeof raw?.replyTo?.messageId === "string" ? raw.replyTo.messageId : "";
+    if (replyTargetId) {
+      const target = membership.room.messages.find(
+        (m) => m.id === replyTargetId && m.kind === "user",
+      );
+      if (target) {
+        replyTo = {
+          messageId: target.id,
+          participantId: target.participantId,
+          name: target.name,
+          text: target.text ?? "",
+          viewOnce: Boolean(target.attachment?.viewOnce),
+        };
+        // View-once media must not leak a mediaId (and the preview is gone
+        // anyway once consumed); other media is quoted with a thumbnail.
+        if (target.attachment && !target.attachment.viewOnce) {
+          replyTo.attachment = {
+            type: target.attachment.type,
+            mediaId: target.attachment.mediaId,
+            name: target.attachment.name,
+          };
+        }
+      }
+    }
+
     const message = rooms.addMessage(
       membership.room,
       participant,
       text,
       clientId,
       attachment,
+      replyTo,
     );
     io.to(membership.room.id).emit("message:new", { message });
   });

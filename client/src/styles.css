@@ -190,3 +190,18 @@
 .cryo-glow {
   animation: cryo-glow 3.6s ease-in-out infinite;
 }
+
+/* Brief highlight when jumping to a quoted message. */
+@keyframes cryo-flash {
+  0% {
+    background-color: rgba(109, 139, 255, 0.28);
+    border-radius: 14px;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.cryo-flash {
+  animation: cryo-flash 1.2s ease-out both;
+}

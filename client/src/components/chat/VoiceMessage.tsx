@@ -6,6 +6,12 @@ import { IconPauseFilled, IconPlayFilled } from "../ui/Icon";
 
 const BAR_COUNT = 22;
 
+/**
+ * Only one voice note plays at a time (WhatsApp-style): when a note starts,
+ * any other currently-playing note is paused.
+ */
+let activeElement: HTMLAudioElement | null = null;
+
 interface Props {
   attachment: MessageAttachment;
   /** Viewer's session id — used as the fetch identity for the media bytes. */
@@ -43,8 +49,15 @@ export function VoiceMessage({ attachment, sessionId, mine }: Props) {
     const onEnded = () => {
       setPlaying(false);
       setElapsed(0);
+      if (activeElement === audio) activeElement = null;
     };
-    const onPlay = () => setPlaying(true);
+    const onPlay = () => {
+      if (activeElement && activeElement !== audio && !activeElement.paused) {
+        activeElement.pause();
+      }
+      activeElement = audio;
+      setPlaying(true);
+    };
     const onPause = () => setPlaying(false);
     audio.addEventListener("loadedmetadata", onMeta);
     audio.addEventListener("timeupdate", onTime);
@@ -55,6 +68,7 @@ export function VoiceMessage({ attachment, sessionId, mine }: Props) {
     return () => {
       audio.pause();
       audio.src = "";
+      if (activeElement === audio) activeElement = null;
       audio.removeEventListener("loadedmetadata", onMeta);
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("ended", onEnded);
