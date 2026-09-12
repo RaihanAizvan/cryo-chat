@@ -31,6 +31,31 @@ const json = async (path, { body, method, includeKey = true, h = {} } = {}) => {
 
 const assert = (cond, msg) => (cond ? ok(msg) : fail(msg));
 
+// 0) Static hosting: the SPA shell must be HTML, but asset/file-like requests
+//    must never be answered with index.html (that MIME mismatch is what turned
+//    the /admin route into a blank page when the page referenced built assets).
+{
+  const shell = await fetch(`${BASE}/admin`);
+  const shellType = shell.headers.get("content-type") ?? "";
+  assert(
+    shell.status === 200 && shellType.startsWith("text/html"),
+    `GET /admin → 200 HTML (got ${shell.status} ${shellType})`,
+  );
+
+  const missingAsset = await fetch(`${BASE}/assets/index-NOTREAL.js`);
+  const assetType = missingAsset.headers.get("content-type") ?? "";
+  assert(
+    missingAsset.status === 404 && !assetType.includes("html"),
+    `missing /assets/*.js → 404, not HTML (got ${missingAsset.status} ${assetType})`,
+  );
+
+  const dotfile = await fetch(`${BASE}/some.random.txt`);
+  assert(
+    dotfile.status === 404 && !(dotfile.headers.get("content-type") ?? "").includes("html"),
+    `file-like path → 404, not HTML (got ${dotfile.status})`,
+  );
+}
+
 // 1) Auth / disabled paths
 {
   const unauth = await json("/stats", { includeKey: false });
