@@ -358,6 +358,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
 
   router.put("/settings", (req, res) => {
     const patch = (req.body ?? {}) as AdminSettingsPatch & Record<string, unknown>;
+    const prev = getSettings();
     const result = updateSettings(patch);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
@@ -369,6 +370,12 @@ export function mountAdminRoutes(app: Express, io: Server): void {
       actor: "admin",
       detail: JSON.stringify(patch),
     });
+    // Push client-relevant feature flags to all connected apps so toggles
+    // take effect without a page reload.
+    const next = getSettings();
+    if (prev.voiceNotesEnabled !== next.voiceNotesEnabled) {
+      io.emit("settings:update", { voiceNotesEnabled: next.voiceNotesEnabled });
+    }
     res.json({ settings: settingsView() });
   });
 
@@ -388,6 +395,7 @@ function settingsView(): AdminSettings {
     messageRateWindowSeconds: Math.round(s.messageRateWindowMs / 1000),
     reservedRoomCode: s.reservedRoomCode,
     reservedRoomEnabled: s.reservedRoomEnabled,
+    voiceNotesEnabled: s.voiceNotesEnabled,
     adminEnabled: Boolean(config.adminKey),
   };
 }

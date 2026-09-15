@@ -48,9 +48,11 @@ export interface ClientToServerEventMap {
 /** Server -> Client events. */
 export interface ServerToClientEventMap {
   /** Initial connection handshake with the temporary identity. */
-  "session:init": { sessionId: string; name: string; color: AvatarColor };
+  "session:init": { sessionId: string; name: string; color: AvatarColor; voiceNotesEnabled: boolean };
   /** Name changed/confirmed (echo back the sanitized server view). */
   "session:name:updated": { name: string };
+  /** Runtime feature flags changed (e.g. voice notes toggle). */
+  "settings:update": { voiceNotesEnabled: boolean };
   /** Ack when a room was created. */
   "room:created": { roomId: string; code: string };
   /** Ack when the client successfully joined a room. */
@@ -347,6 +349,8 @@ export interface AdminSettings {
   messageRateWindowSeconds: number;
   reservedRoomCode: string;
   reservedRoomEnabled: boolean;
+  /** When false, the app hides the voice-note (mic) button. */
+  voiceNotesEnabled: boolean;
   adminEnabled: boolean;
 }
 

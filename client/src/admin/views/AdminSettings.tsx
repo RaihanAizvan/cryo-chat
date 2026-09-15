@@ -34,6 +34,7 @@ const TEXT_FIELDS: FieldDef[] = [
 
 const TOGGLE_FIELDS: FieldDef[] = [
   { key: "reservedRoomEnabled", label: "Reserved room enabled", hint: "When off, the reserved room is not auto-created.", kind: "toggle" },
+  { key: "voiceNotesEnabled", label: "Voice notes enabled", hint: "When off, the app hides the voice-note (mic) button.", kind: "toggle" },
 ];
 
 export function AdminSettings() {

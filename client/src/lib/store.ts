@@ -76,6 +76,7 @@ const session = new ExternalStore<SessionState>({
   name: null,
   color: 0,
 });
+const voiceNotesEnabled = new ExternalStore<boolean>(true);
 
 socket.on("connect", () => {
   lastConnectAt = Date.now();
@@ -105,6 +106,7 @@ socket.on("session:init", (data) => {
     name: data.name,
     color: data.color,
   });
+  voiceNotesEnabled.set(data.voiceNotesEnabled !== false);
   connectionStatus.set("connected");
   // Remember our identity so reconnects/reloads keep the same session.
   if (data.sessionId) setStoredSessionId(data.sessionId);
@@ -119,6 +121,12 @@ socket.on("session:name:updated", (data) => {
   session.set({ ...session.get(), name: data.name });
 });
 
+socket.on("settings:update", (data) => {
+  if (typeof data?.voiceNotesEnabled === "boolean") {
+    voiceNotesEnabled.set(data.voiceNotesEnabled);
+  }
+});
+
 function useStore<T>(store: ExternalStore<T>): T {
   const getSnapshot = store.get.bind(store);
   return useSyncExternalStore(store.subscribe.bind(store), getSnapshot, getSnapshot);
@@ -130,6 +138,10 @@ export function useConnectionStatus(): ConnectionStatus {
 
 export function useSession(): SessionState {
   return useStore(session);
+}
+
+export function useVoiceNotesEnabled(): boolean {
+  return useStore(voiceNotesEnabled);
 }
 
 export function updateDisplayName(name: string): void {
