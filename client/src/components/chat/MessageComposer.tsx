@@ -18,6 +18,7 @@ import { prepareUpload } from "../../lib/image";
 import { makeSticker } from "../../lib/sticker";
 import { recordEmoji } from "../../lib/emoji";
 import { startVoiceRecording, type ActiveVoiceRecording } from "../../lib/voice";
+import { useVoiceNotesEnabled } from "../../lib/store";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
 
 interface Props {
@@ -66,6 +67,7 @@ export function MessageComposer({
   const [recBusy, setRecBusy] = useState(false);
   const isCoarse = useCoarsePointer();
   const { inset } = useKeyboardInset();
+  const voiceNotesEnabled = useVoiceNotesEnabled();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +78,14 @@ export function MessageComposer({
     setText(value);
     if (value && onTyping) onTyping();
   };
+
+  useEffect(() => {
+    if (rec && !voiceNotesEnabled) {
+      rec.cancel();
+      setRec(null);
+      setRecStartedAt(0);
+    }
+  }, [rec, voiceNotesEnabled]);
 
   useEffect(() => {
     if (!emojiOpen && !gifOpen && !pending && !rec) return;
@@ -311,6 +321,7 @@ export function MessageComposer({
 
   /** Start recording a voice note (mic permission prompt on first use). */
   const startVoice = async () => {
+    if (!voiceNotesEnabled) return;
     closeAllPanels();
     // Re-tapping the mic restarts: release the previous stream first so the
     // microphone indicator doesn't stay lit on an orphaned recorder.
@@ -484,19 +495,21 @@ export function MessageComposer({
           <IconSticker width={21} height={21} />
         </button>
 
-        <button
-          type="button"
-          onClick={() => void startVoice()}
-          disabled={recBusy}
-          aria-label={rec ? "Restart voice note" : "Record voice note"}
-          className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
-            rec
-              ? "bg-rose-500/15 text-rose-500"
-              : "text-ink-muted hover:bg-base-raised active:bg-base-border"
-          }`}
-        >
-          <IconMic width={21} height={21} />
-        </button>
+        {voiceNotesEnabled && (
+          <button
+            type="button"
+            onClick={() => void startVoice()}
+            disabled={recBusy}
+            aria-label={rec ? "Restart voice note" : "Record voice note"}
+            className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+              rec
+                ? "bg-rose-500/15 text-rose-500"
+                : "text-ink-muted hover:bg-base-raised active:bg-base-border"
+            }`}
+          >
+            <IconMic width={21} height={21} />
+          </button>
+        )}
 
         <button
           type="button"

@@ -98,6 +98,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
     sessionId: session.id,
     name: session.name,
     color: session.color,
+    voiceNotesEnabled: getSettings().voiceNotesEnabled,
   });
 
   socket.on("session:name", (raw) => {

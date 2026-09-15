@@ -21,6 +21,7 @@ export interface SettingsDict {
   messageRateWindowMs: number;
   reservedRoomCode: string;
   reservedRoomEnabled: boolean;
+  voiceNotesEnabled: boolean;
   sweepIntervalMs: number;
 }
 
@@ -57,6 +58,7 @@ function base(): SettingsDict {
     messageRateWindowMs: config.messageRateWindowMs,
     reservedRoomCode: config.reservedRoomCode,
     reservedRoomEnabled: true,
+    voiceNotesEnabled: true,
     sweepIntervalMs: config.sweepIntervalMs,
   };
 }
@@ -123,6 +125,13 @@ export function updateSettings(patch: Record<string, unknown>): { ok: true; sett
       errors.push("reservedRoomEnabled must be a boolean");
     } else {
       next.reservedRoomEnabled = patch.reservedRoomEnabled;
+    }
+  }
+  if (patch.voiceNotesEnabled !== undefined) {
+    if (typeof patch.voiceNotesEnabled !== "boolean") {
+      errors.push("voiceNotesEnabled must be a boolean");
+    } else {
+      next.voiceNotesEnabled = patch.voiceNotesEnabled;
     }
   }
 
