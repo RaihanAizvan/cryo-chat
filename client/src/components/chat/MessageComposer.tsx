@@ -336,8 +336,8 @@ export function MessageComposer({
     setRecBusy(true);
     try {
       const { blob, duration } = await rec.stop();
-      const file = new File([blob], "voice-note.webm", {
-        type: blob.type || "audio/webm",
+      const file = new File([blob], "voice-note.wav", {
+        type: blob.type || "audio/wav",
       });
       const up = await uploadAny(file, { name: "Voice note", voice: true, duration });
       onSend("", { type: "voice", mediaId: up.mediaId, duration: up.duration, name: up.name }, replyTarget ?? undefined);
