@@ -182,6 +182,12 @@ export const MAX_MEDIA_COUNT = 256;
  */
 export const MAX_MEDIA_TOTAL_BYTES = 256 * 1024 * 1024;
 
+/** TEST-ONLY: clear the in-memory stores so unit tests start from a clean slate. */
+export function resetForTest(): void {
+  media.clear();
+  remoteMedia.clear();
+}
+
 /** Newest first eviction when we run out of room — trims nornal media only. */
 function evictOldestNormal(): boolean {
   const candidates: StoredMedia[] = [];

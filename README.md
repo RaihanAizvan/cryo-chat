@@ -1,6 +1,6 @@
 # Cryo Chat 
 
-  
+![CI](https://github.com/RaihanAizvan/cryo-chat/actions/workflows/ci.yml/badge.svg)
 
 An anonymous chat app. No accounts, no history.  You hop in, talk, bounce. The chats literally melts away after a while.
 
