@@ -46,11 +46,22 @@ jobs:
         run: |
           node server/dist/index.mjs > server-e2e.log 2>&1 &
           PID=$!
-          for i in $(seq 1 30); do
-            grep -q "server listening" server-e2e.log && break
+          server_up=0
+          for i in $(seq 1 60); do
+            if grep -q "server listening" server-e2e.log; then server_up=1; break; fi
+            if ! kill -0 $PID 2>/dev/null; then break; fi
             sleep 1
           done
-          node server/.admin-e2e.mjs http://localhost:4567 test-admin-key
+          if [ "$server_up" -ne 1 ]; then
+            echo "server failed to start:"
+            cat server-e2e.log
+            kill $PID 2>/dev/null || true
+            exit 1
+          fi
+          set +e
+          timeout 120 node server/.admin-e2e.mjs http://localhost:4567 test-admin-key
           EXIT=$?
+          set -e
           kill $PID 2>/dev/null || true
+          cat server-e2e.log
           exit $EXIT
