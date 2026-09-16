@@ -82,17 +82,25 @@ const assert = (cond, msg) => (cond ? ok(msg) : fail(msg));
 
 // 2) Socket flow: alice creates room, bob joins, both send
 const baseSocketIo = "socket.io"; // path default
-const connect = () => new Promise((resolve, reject) => {
-  const s = createClient(BASE, { path: "/socket.io", transports: ["websocket"] });
-  s.on("connect", () => resolve(s));
-  s.on("connect_error", reject);
-});
-
-const alice = await connect();
-const bob = await connect();
 const ids = {};
-alice.on("session:init", (d) => (ids.alice = d.sessionId));
-bob.on("session:init", (d) => (ids.bob = d.sessionId));
+// Resolve only after session:init so the session ids below are always
+// available. The server can emit init in the same tick as 'connect'; a
+// listener attached afterwards racelessly misses it (last time that happened,
+// kick+mban had no participantId → 400 → the suite hung).
+const connect = (name) =>
+  new Promise((resolve, reject) => {
+    const s = createClient(BASE, { path: "/socket.io", transports: ["websocket"] });
+    const timer = setTimeout(() => reject(new Error(`${name}: session:init timeout`)), 5000);
+    s.on("connect_error", reject);
+    s.on("session:init", (d) => {
+      clearTimeout(timer);
+      ids[name] = d.sessionId;
+      resolve(s);
+    });
+  });
+
+alice = await connect("alice");
+bob = await connect("bob");
 const aliceRoom = new Promise((resolve) => {
   alice.once("room:joined", (d) => resolve(d.room));
 });
