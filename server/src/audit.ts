@@ -77,6 +77,24 @@ export interface AuditInput {
   detail?: string;
 }
 
+/** TEST-ONLY: clear the in-memory audit/analytics state so tests stay isolated. */
+export function resetForTest(): void {
+  events.length = 0;
+  seq = 0;
+  counts.messages = 0;
+  counts.uploads = 0;
+  counts.joins = 0;
+  counts.leaves = 0;
+  counts.roomsCreated = 0;
+  counts.sessionsCreated = 0;
+  for (const k of Object.keys(splits)) splits[k] = 0;
+  roomTraffic.clear();
+  userMessages.clear();
+  userUploads.clear();
+  userLastActive.clear();
+  buckets.length = 0;
+}
+
 export function record(input: AuditInput): void {
   const ts = Date.now();
   events.push({

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck + test + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 22 is the dev/test toolchain (Vitest 5 + jsdom 30 require it);
+          # the server bundle still targets node20 for production.
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build client + server
+        run: npm run build
+
+      - name: Test (unit + integration on the compiled bundle)
+        run: npm test
+
+      - name: Smoke e2e (admin suite against the compiled bundle)
+        env:
+          PORT: 4567
+          ADMIN_KEY: test-admin-key
+        run: |
+          node server/dist/index.mjs > server-e2e.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 30); do
+            grep -q "server listening" server-e2e.log && break
+            sleep 1
+          done
+          node server/.admin-e2e.mjs http://localhost:4567 test-admin-key
+          EXIT=$?
+          kill $PID 2>/dev/null || true
+          exit $EXIT
