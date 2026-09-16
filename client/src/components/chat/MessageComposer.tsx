@@ -465,6 +465,7 @@ export function MessageComposer({
           onPaste={handlePaste}
           maxLength={MAX_MESSAGE_LENGTH}
           placeholder="Message…"
+          aria-label="Message"
           enterKeyHint={isCoarse ? "enter" : "send"}
           autoCapitalize="sentences"
           autoCorrect="on"

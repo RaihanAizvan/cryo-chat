@@ -75,6 +75,7 @@ export function AttachmentSheet({ file, previewUrl, onCancel, onSend }: Props) {
                   onChange={(e) => setCaption(e.target.value)}
                   maxLength={MAX_MESSAGE_LENGTH}
                   placeholder="Add a caption…"
+                  aria-label="Add a caption"
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
