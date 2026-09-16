@@ -9,10 +9,22 @@ import { io as createClient } from "socket.io-client";
 const BASE = process.argv[2] ?? "http://localhost:4567";
 const KEY = process.argv[3] ?? "test-admin-key";
 
+// Fail fast on the first assertion error: close the sockets so Node can exit,
+// and stop the script instead of lingering on a never-resolving promise (that
+// would burn CI's whole job budget waiting on the 'timeout' wrapper).
 const fail = (msg) => {
   console.error(`✗ ${msg}`);
-  process.exitCode = 1;
+  try {
+    alice?.disconnect();
+    bob?.disconnect();
+  } catch {
+    /* sockets may not exist yet */
+  }
+  process.exit(1);
 };
+
+let alice;
+let bob;
 
 const ok = (msg) => console.log(`✓ ${msg}`);
 
