@@ -47,6 +47,7 @@ export function NameEditor({ initial, onClose }: Props) {
         maxLength={MAX_NAME_LENGTH}
         autoCapitalize="words"
         autoCorrect="off"
+        aria-label="Display name"
         className="w-full rounded-2xl border border-base-border2 bg-base-sunken px-4 py-3.5 text-[15px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
       />
 

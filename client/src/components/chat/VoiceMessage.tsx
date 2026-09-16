@@ -120,13 +120,21 @@ export function VoiceMessage({ attachment, sessionId, mine }: Props) {
         className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-[2px]"
         role="slider"
         aria-label="Seek"
+        tabIndex={0}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(fraction * 100)}
+        aria-valuetext={`${Math.round(fraction * 100)} percent`}
         onClick={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const frac = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0;
           seekTo(frac);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+          e.preventDefault();
+          const step = e.key === "ArrowRight" ? 0.05 : -0.05;
+          seekTo(Math.min(1, Math.max(0, fraction + step)));
         }}
       >
         {Array.from({ length: BAR_COUNT }, (_, i) => {

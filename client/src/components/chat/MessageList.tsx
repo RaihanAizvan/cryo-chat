@@ -87,6 +87,9 @@ export function MessageList({ messages, selfId, otherIds, seenBy, bottomInset, o
       <div
         ref={scrollRef}
         onScroll={onScroll}
+        role="log"
+        aria-label="Messages"
+        aria-live="polite"
         className="no-scrollbar h-full overflow-y-auto overscroll-contain px-3 py-3"
         style={{ paddingBottom: bottomInset }}
       >
