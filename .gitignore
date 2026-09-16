@@ -5,6 +5,9 @@ node_modules/
 client/dist/
 server/dist/
 
+# Test coverage
+coverage/
+
 # Logs
 *.log
 npm-debug.log*

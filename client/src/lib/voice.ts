@@ -159,7 +159,7 @@ export async function reencodeToWav(
 }
 
 /** Byte-packed RIFF/WAVE header + mono 16-bit PCM payload. */
-function encodeWavBytes({
+export function encodeWavBytes({
   sampleRate,
   channels,
   pcm,
