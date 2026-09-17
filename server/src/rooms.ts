@@ -555,6 +555,12 @@ export async function loadRoomByCodeFromStore(code: string): Promise<Room | unde
   return snapshot ? hydrateRoom(snapshot) : undefined;
 }
 
+/** All live rooms across the cluster (admin live view). */
+export async function loadAllRoomsFromStore(): Promise<Room[]> {
+  const snaps = await store.loadRooms();
+  return snaps.map(hydrateRoom).filter((r) => !isExpired(r));
+}
+
 const CODE_CLAIM_ATTEMPTS = 8;
 
 /**

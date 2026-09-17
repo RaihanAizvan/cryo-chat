@@ -102,8 +102,10 @@ function roomDetail(r: rooms.Room): AdminRoomDetail {
   };
 }
 
-function liveRooms(): rooms.Room[] {
-  return rooms.allRooms().filter((r) => !rooms.isExpired(r));
+/** Cluster-wide live rooms (admin views read the shared store, not this
+ *  instance's cache only). */
+async function liveRoomsCluster(): Promise<rooms.Room[]> {
+  return rooms.loadAllRoomsFromStore();
 }
 
 function onlineFor(r: rooms.Room, io: Server): number {
@@ -115,18 +117,21 @@ function onlineFor(r: rooms.Room, io: Server): number {
 }
 
 /** Resolve a session's current room (if any) from live room memberships. */
-function liveRoomFor(sessionId: string): { roomId: string; roomCode: string } | undefined {
-  for (const r of liveRooms()) {
+function liveRoomFor(
+  sessionId: string,
+  live: rooms.Room[],
+): { roomId: string; roomCode: string } | undefined {
+  for (const r of live) {
     if (r.participants.has(sessionId)) return { roomId: r.id, roomCode: r.code };
   }
   return undefined;
 }
 
-function usersView(): AdminUser[] {
+function usersView(live: rooms.Room[]): AdminUser[] {
   const out: AdminUser[] = [];
   for (const s of sessions.allIdentities()) {
     const activity = audit.userStats(s.id);
-    const loc = liveRoomFor(s.id);
+    const loc = liveRoomFor(s.id, live);
     out.push({
       sessionId: s.id,
       name: s.name,
@@ -154,8 +159,8 @@ export function mountAdminRoutes(app: Express, io: Server): void {
   router.use(express.json({ limit: "64kb" }));
 
   // -- stats ---------------------------------------------------------------
-  router.get("/stats", (req, res) => {
-    const lr = liveRooms();
+  router.get("/stats", async (_req, res) => {
+    const lr = await liveRoomsCluster();
     const ms = media.mediaStats();
     const t = audit.totals();
     const online = lr.reduce((acc, r) => acc + onlineFor(r, io), 0);
@@ -177,14 +182,14 @@ export function mountAdminRoutes(app: Express, io: Server): void {
   });
 
   // -- rooms ---------------------------------------------------------------
-  router.get("/rooms", (req, res) => {
-    const sum = liveRooms().map((r) => roomSummary(r));
+  router.get("/rooms", async (_req, res) => {
+    const sum = (await liveRoomsCluster()).map((r) => roomSummary(r));
     sum.sort((a, b) => b.createdAt - a.createdAt);
     res.json({ rooms: sum });
   });
 
-  router.get("/rooms/:id", (req, res) => {
-    const r = rooms.getRoom(req.params.id);
+  router.get("/rooms/:id", async (req, res) => {
+    const r = await rooms.loadRoomFromStore(req.params.id);
     if (!r || rooms.isExpired(r)) {
       res.status(404).json({ error: "not_found" });
       return;
@@ -193,8 +198,8 @@ export function mountAdminRoutes(app: Express, io: Server): void {
   });
 
   // Full message log for a room (export).
-  router.get("/rooms/:id/messages", (req, res) => {
-    const r = rooms.getRoom(req.params.id);
+  router.get("/rooms/:id/messages", async (req, res) => {
+    const r = await rooms.loadRoomFromStore(req.params.id);
     if (!r || rooms.isExpired(r)) {
       res.status(404).json({ error: "not_found" });
       return;
@@ -204,7 +209,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
 
   // Kick a member (optionally ban by session id).
   router.post("/rooms/:id/kick", async (req, res) => {
-    const r = rooms.getRoom(req.params.id);
+    const r = await rooms.loadRoomFromStore(req.params.id);
     if (!r || rooms.isExpired(r)) {
       res.status(404).json({ error: "not_found" });
       return;
@@ -231,7 +236,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
         roomCode: r.code,
       });
       // If they were in other rooms too, drop them everywhere.
-      for (const other of liveRooms()) {
+      for (const other of await liveRoomsCluster()) {
         if (other.id !== r.id && other.participants.has(pid)) {
           await adminRemoveMember(io, other, pid, "banned");
         }
@@ -242,8 +247,8 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     res.json({ ok: true, banned: false, participantId: pid });
   });
 
-  router.post("/rooms/:id/clear", (req, res) => {
-    const r = rooms.getRoom(req.params.id);
+  router.post("/rooms/:id/clear", async (req, res) => {
+    const r = await rooms.loadRoomFromStore(req.params.id);
     if (!r || rooms.isExpired(r)) {
       res.status(404).json({ error: "not_found" });
       return;
@@ -262,8 +267,8 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     res.json({ ok: true });
   });
 
-  router.post("/rooms/:id/close", (req, res) => {
-    const r = rooms.getRoom(req.params.id);
+  router.post("/rooms/:id/close", async (req, res) => {
+    const r = await rooms.loadRoomFromStore(req.params.id);
     if (!r || rooms.isExpired(r)) {
       res.status(404).json({ error: "not_found" });
       return;
@@ -273,8 +278,8 @@ export function mountAdminRoutes(app: Express, io: Server): void {
   });
 
   // -- users ---------------------------------------------------------------
-  router.get("/users", (_req, res) => {
-    res.json({ users: usersView() });
+  router.get("/users", async (_req, res) => {
+    res.json({ users: usersView(await liveRoomsCluster()) });
   });
 
   router.post("/users/:id/ban", async (req, res) => {
@@ -291,7 +296,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
       sessionId: id,
     });
     // Drop the session from every room it's in.
-    for (const r of liveRooms()) {
+    for (const r of await liveRoomsCluster()) {
       if (r.participants.has(id)) await adminRemoveMember(io, r, id, "banned");
     }
     res.json({ ok: true, banned: true });

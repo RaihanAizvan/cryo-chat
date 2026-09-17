@@ -22,40 +22,15 @@ import {
   fetchRemoteDetails,
   remoteSecureUrl,
 } from "./cloudinary.js";
+import { store } from "./store.js";
 
-/** Per-IP upload limiter state (media byte blobs are cheap to flood). */
-const uploadLimits = new Map<string, { count: number; resetAt: number }>();
+/** Upload byte budget per IP per window (media blobs are cheap to flood). */
 const UPLOAD_WINDOW_MS = 60_000;
 const UPLOAD_MAX_PER_WINDOW = 20;
 
-/** Per-IP Giphy search limiter (the proxy now hides the key, so guard it). */
-const giphyLimits = new Map<string, { count: number; resetAt: number }>();
+/** Giphy search budget per IP per window (the proxy hides the key). */
 const GIPHY_WINDOW_MS = 60_000;
 const GIPHY_MAX_PER_WINDOW = 60;
-
-function allowUpload(ip: string): boolean {
-  const now = Date.now();
-  const bucket = uploadLimits.get(ip);
-  if (!bucket || now >= bucket.resetAt) {
-    uploadLimits.set(ip, { count: 1, resetAt: now + UPLOAD_WINDOW_MS });
-    return true;
-  }
-  if (bucket.count >= UPLOAD_MAX_PER_WINDOW) return false;
-  bucket.count += 1;
-  return true;
-}
-
-function allowGiphySearch(ip: string): boolean {
-  const now = Date.now();
-  const bucket = giphyLimits.get(ip);
-  if (!bucket || now >= bucket.resetAt) {
-    giphyLimits.set(ip, { count: 1, resetAt: now + GIPHY_WINDOW_MS });
-    return true;
-  }
-  if (bucket.count >= GIPHY_MAX_PER_WINDOW) return false;
-  bucket.count += 1;
-  return true;
-}
 
 interface GiphyImage {
   url?: string;
@@ -105,9 +80,9 @@ export function createHttpApp(): express.Express {
   app.post(
     "/api/media",
     express.raw({ type: () => true, limit: `${MAX_MEDIA_BYTES}` }),
-    (req, res) => {
+    async (req, res) => {
       const ip = (req.ip ?? req.socket.remoteAddress) || "unknown";
-      if (!allowUpload(ip)) {
+      if (!(await store.rateLimit(`upload:${ip}`, UPLOAD_MAX_PER_WINDOW, UPLOAD_WINDOW_MS))) {
         res.status(429).json({ error: "too_many_uploads" });
         return;
       }
@@ -218,7 +193,7 @@ export function createHttpApp(): express.Express {
     express.json({ limit: "16kb" }),
     async (req, res) => {
       const ip = (req.ip ?? req.socket.remoteAddress) || "unknown";
-      if (!allowUpload(ip)) {
+      if (!(await store.rateLimit(`upload:${ip}`, UPLOAD_MAX_PER_WINDOW, UPLOAD_WINDOW_MS))) {
         res.status(429).json({ error: "too_many_uploads" });
         return;
       }
@@ -281,7 +256,7 @@ export function createHttpApp(): express.Express {
       return;
     }
     const ip = (req.ip ?? req.socket.remoteAddress) || "unknown";
-    if (!allowGiphySearch(ip)) {
+    if (!(await store.rateLimit(`giphy:${ip}`, GIPHY_MAX_PER_WINDOW, GIPHY_WINDOW_MS))) {
       res.status(429).json({ error: "too_many_searches" });
       return;
     }

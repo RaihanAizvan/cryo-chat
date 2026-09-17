@@ -15,16 +15,11 @@ import type { Session } from "./sessions.js";
 import * as rooms from "./rooms.js";
 import * as media from "./media.js";
 import * as audit from "./audit.js";
-import { normalizeMessage, normalizeCaption, RateLimiter } from "./validation.js";
+import { normalizeMessage, normalizeCaption } from "./validation.js";
 import { normalizeCode } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
 import { isBanned } from "./bans.js";
 import { store } from "./store.js";
-
-const messageLimiter = new RateLimiter(
-  () => getSettings().messageRateLimit,
-  () => getSettings().messageRateWindowMs,
-);
 
 /** Internal participant nonce bound to a socket within a room. */
 const ROOM_MEMBERSHIP = new WeakMap<Socket, { room: rooms.Room; pid: string }>();
@@ -276,7 +271,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
     socket.emit("room:status:result", { statuses });
   });
 
-  socket.on("message:send", (raw) => {
+  socket.on("message:send", async (raw) => {
     const membership = activeMembership(socket);
     if (!membership) {
       sendError(socket, { code: "not_in_room", message: "Join a room first." });
@@ -323,7 +318,17 @@ export function attachHandlers(io: Server, socket: Socket): void {
       });
       return;
     }
-    if (!messageLimiter.allow(socket.id)) {
+    const participant = rooms.participantForSocket(membership.room, socket.id);
+    if (!participant) return;
+    // Cluster-wide rate limit keyed by the (shared) participant identity so a
+    // flooding client can't dodge it by reconnecting to another instance.
+    if (
+      !(await store.rateLimit(
+        `msg:${participant.id}`,
+        getSettings().messageRateLimit,
+        getSettings().messageRateWindowMs,
+      ))
+    ) {
       sendError(socket, {
         code: "rate_limited",
         message: "Slow down a little.",
@@ -331,8 +336,6 @@ export function attachHandlers(io: Server, socket: Socket): void {
       });
       return;
     }
-    const participant = rooms.participantForSocket(membership.room, socket.id);
-    if (!participant) return;
 
     // Resolve the quoted message server-side: never trust client-supplied reply
     // content. If the target isn't a real user message in this room (e.g. the
@@ -669,7 +672,6 @@ export function startSweeper(io: Server): NodeJS.Timeout {
 }
 
 async function sweep(io: Server): Promise<void> {
-  messageLimiter.sweep();
   media.pruneMedia();
   media.pruneRemoteMedia();
   for (const room of rooms.allRooms()) {
