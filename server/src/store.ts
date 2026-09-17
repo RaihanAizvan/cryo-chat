@@ -40,11 +40,17 @@ export type RoomEvent =
   | { kind: "seen"; roomId: string; participantId: string; messageId: string }
   | { kind: "rename"; roomId: string; participantId: string; name: string };
 
+export type RoomEventEnvelope = RoomEvent & {
+  /** Instance that originated the event, so the sender ignores its echo. */
+  origin?: string;
+};
+
 export interface StoreEvents {
   session: (e: SessionEvent) => void;
   ban: (e: BanEvent) => void;
   settings: (s: SettingsDict) => void;
-  room: (e: RoomEvent) => void;
+  /** Room events travel wrapped in an envelope so the origin can ignore echo. */
+  room: (e: RoomEventEnvelope) => void;
 }
 
 export interface AppendMessageInput {
@@ -409,7 +415,10 @@ class RedisStore implements Store {
   }
 
   async publishRoom(event: RoomEvent): Promise<void> {
-    await this.publish("room", event);
+    // Tag with the originating instance so the publisher (which already applied
+    // the change locally) can ignore its own echo and avoid double-applying.
+    const envelope: RoomEventEnvelope = { ...event, origin: config.instanceId };
+    await this.publish("room", envelope);
   }
 
   async rateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
