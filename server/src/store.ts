@@ -427,7 +427,12 @@ class RedisStore implements Store {
 
   async loadRoomByCode(code: string): Promise<RoomSnapshot | null> {
     const id = await this.cmd.get(this.codeKey(code));
-    return id ? this.readRoom(id) : null;
+    if (!id) return null;
+    const room = await this.readRoom(id);
+    // A claim whose room keys already expired would otherwise block the code
+    // forever; clear it so the code can be recreated.
+    if (!room) await this.cmd.del(this.codeKey(code));
+    return room;
   }
 
   async saveRoom(room: RoomSnapshot): Promise<void> {

@@ -203,7 +203,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
   });
 
   // Kick a member (optionally ban by session id).
-  router.post("/rooms/:id/kick", (req, res) => {
+  router.post("/rooms/:id/kick", async (req, res) => {
     const r = rooms.getRoom(req.params.id);
     if (!r || rooms.isExpired(r)) {
       res.status(404).json({ error: "not_found" });
@@ -216,7 +216,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
       res.status(400).json({ error: "participantId is required" });
       return;
     }
-    const removed = adminRemoveMember(io, r, pid, reason);
+    const removed = await adminRemoveMember(io, r, pid, reason);
     if (!removed) {
       res.status(404).json({ error: "member_not_found" });
       return;
@@ -233,7 +233,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
       // If they were in other rooms too, drop them everywhere.
       for (const other of liveRooms()) {
         if (other.id !== r.id && other.participants.has(pid)) {
-          adminRemoveMember(io, other, pid, "banned");
+          await adminRemoveMember(io, other, pid, "banned");
         }
       }
       res.json({ ok: true, banned: true, participantId: pid });
@@ -277,7 +277,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     res.json({ users: usersView() });
   });
 
-  router.post("/users/:id/ban", (req, res) => {
+  router.post("/users/:id/ban", async (req, res) => {
     const id = req.params.id;
     if (!bans.ban(id)) {
       res.status(409).json({ error: "already_banned" });
@@ -292,7 +292,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     });
     // Drop the session from every room it's in.
     for (const r of liveRooms()) {
-      if (r.participants.has(id)) adminRemoveMember(io, r, id, "banned");
+      if (r.participants.has(id)) await adminRemoveMember(io, r, id, "banned");
     }
     res.json({ ok: true, banned: true });
   });

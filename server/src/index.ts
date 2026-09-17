@@ -5,7 +5,8 @@
 
 import http from "node:http";
 import { Server } from "socket.io";
-import { config } from "./config.js";
+import { createAdapter } from "@socket.io/redis-adapter";
+import { config, redisConfigured } from "./config.js";
 import { createHttpApp, attachClientStatic } from "./http.js";
 import { socketIoCors } from "./cors.js";
 import { attachHandlers, startSweeper } from "./handlers.js";
@@ -13,7 +14,7 @@ import { destroy, loadFromStore as loadSessions } from "./sessions.js";
 import { loadFromStore as loadBans } from "./bans.js";
 import { getSettings, loadFromStore as loadSettings } from "./settings.js";
 import { mountAdminRoutes } from "./admin.js";
-import { store } from "./store.js";
+import { store, createRedisClient } from "./store.js";
 
 const app = createHttpApp();
 const server = http.createServer(app);
@@ -28,6 +29,13 @@ const io = new Server(server, {
     maxDisconnectionDuration: 120_000,
   },
 });
+
+// Multi-instance mode: a Redis pub/sub adapter shares rooms and broadcasts
+// across every instance, so messages and presence reach members wherever they
+// are connected. Memory mode (no Redis) keeps the in-process default.
+if (redisConfigured) {
+  io.adapter(createAdapter(createRedisClient(), createRedisClient()));
+}
 
 // Admin console first (guarded by X-Admin-Key) so the SPA catch-all never
 // shadows it, then the built client in production.

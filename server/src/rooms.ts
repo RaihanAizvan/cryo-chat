@@ -79,6 +79,8 @@ const codeIndex = new Map<string, Room>();
 
 export interface CreateRoomOptions {
   code?: string;
+  /** Set false so a caller can claim the code in the store before persisting. */
+  persist?: boolean;
 }
 
 /** Create a new room and return it. The host participant is added by caller. */
@@ -111,7 +113,7 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
   }
   rooms.set(id, room);
   codeIndex.set(room.code, room);
-  persistRoom(room);
+  if (options.persist !== false) persistRoom(room);
   return room;
 }
 
@@ -432,11 +434,14 @@ function ttlSeconds(room: Room): number {
  * separately by `appendMessage`, so the broadcast payload carries none of them.
  */
 function persistRoom(room: Room): void {
+  // A detached room (deleted on another instance) must never be resurrected.
+  if (rooms.get(room.id) !== room) return;
   void store.saveRoom({ ...snapshotRoom(room), messages: [] });
 }
 
 /** Append one message with the atomic cap + TTL trim, then tell other instances. */
 function persistMessage(room: Room, message: InternalMessage): void {
+  if (rooms.get(room.id) !== room) return;
   void store.appendMessage({
     roomId: room.id,
     message,
@@ -548,5 +553,56 @@ export async function loadRoomByCodeFromStore(code: string): Promise<Room | unde
   if (local) return local;
   const snapshot = await store.loadRoomByCode(code);
   return snapshot ? hydrateRoom(snapshot) : undefined;
+}
+
+const CODE_CLAIM_ATTEMPTS = 8;
+
+/**
+ * Create a room and atomically claim its code in the shared store. A random
+ * code owned by another instance is regenerated; a caller-requested code that
+ * is already taken returns null so the caller can answer "room_exists".
+ */
+export async function createRoomClaimed(options: CreateRoomOptions = {}): Promise<Room | null> {
+  const wanted = options.code;
+  for (let attempt = 0; attempt < CODE_CLAIM_ATTEMPTS; attempt++) {
+    // Create locally first, then claim + persist only once the code is ours.
+    const room = createRoom({ code: wanted, persist: false });
+    if (await store.claimCode(room.code, room.id)) {
+      await store.saveRoom(snapshotRoom(room));
+      return room;
+    }
+    removeLocalRoom(room.id);
+    if (wanted) return null;
+  }
+  return null;
+}
+
+/**
+ * Reserved room, deduped across instances: whoever claims the code first wins
+ * and every other instance hydrates that same room.
+ */
+export async function getOrCreateReservedRoomClaimed(): Promise<Room | undefined> {
+  const settings = getSettings();
+  if (!settings.reservedRoomEnabled) return undefined;
+  const existing = await loadRoomByCodeFromStore(settings.reservedRoomCode);
+  if (existing) return existing;
+  const created = await createRoomClaimed({ code: settings.reservedRoomCode });
+  if (created) return created;
+  // Lost a race: the winner's room is now in the store.
+  return loadRoomByCodeFromStore(settings.reservedRoomCode);
+}
+
+/** Remove a participant by id (admin moderation, including remote members). */
+export function removeParticipantById(room: Room, participantId: string): Participant | undefined {
+  const participant = room.participants.get(participantId);
+  if (!participant) return undefined;
+  for (const [sid, pid] of room.sockets) if (pid === participantId) room.sockets.delete(sid);
+  room.participants.delete(participantId);
+  if (room.hostParticipantId === participantId) {
+    const next = room.participants.values().next().value;
+    room.hostParticipantId = next ? next.id : "";
+  }
+  persistRoom(room);
+  return participant;
 }
 
