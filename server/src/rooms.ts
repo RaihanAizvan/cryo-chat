@@ -19,6 +19,9 @@ import type {
 } from "@cryo/shared";
 import { randomRoomCode, randomRoomId } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
+import { store } from "./store.js";
+import type { RoomEventEnvelope } from "./store.js";
+import { config } from "./config.js";
 
 interface InternalMessage {
   id: string;
@@ -108,6 +111,7 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
   }
   rooms.set(id, room);
   codeIndex.set(room.code, room);
+  persistRoom(room);
   return room;
 }
 
@@ -176,6 +180,13 @@ export function getOrCreateReservedRoom(): Room | undefined {
 
 export function deleteRoom(id: string): boolean {
   const room = rooms.get(id);
+  const removed = removeLocalRoom(id, room);
+  if (removed) void store.deleteRoom(id);
+  return removed;
+}
+
+/** Evict a room from the local caches only (no store write, no loop). */
+function removeLocalRoom(id: string, room = rooms.get(id)): boolean {
   if (room && codeIndex.get(room.code) === room) codeIndex.delete(room.code);
   return rooms.delete(id);
 }
@@ -208,6 +219,7 @@ export function addParticipant(
   room.participants.set(participantId, participant);
   room.sockets.set(socket.id, participantId);
   if (!room.hostParticipantId) room.hostParticipantId = participantId;
+  persistRoom(room);
   return participant;
 }
 
@@ -232,6 +244,7 @@ export function removeParticipant(
     const next = room.participants.values().next().value;
     room.hostParticipantId = next ? next.id : "";
   }
+  persistRoom(room);
   return { participant, empty: room.participants.size === 0 };
 }
 
@@ -248,6 +261,7 @@ export function renameParticipant(
   if (!participant) return undefined;
   participant.name = name;
   participant.color = color;
+  persistRoom(room);
   return participant;
 }
 
@@ -260,6 +274,7 @@ export function renameParticipantById(
   const participant = room.participants.get(participantId);
   if (!participant) return undefined;
   participant.name = name;
+  persistRoom(room);
   return participant;
 }
 
@@ -341,6 +356,7 @@ function storeMessage(room: Room, message: InternalMessage): void {
   if (room.messages.length > settings.messageCap) {
     room.messages.splice(0, room.messages.length - settings.messageCap);
   }
+  persistMessage(room, message);
 }
 
 /** Get normalized public messages for a room (most-recent-first order kept). */
@@ -352,12 +368,17 @@ export function getMessages(room: Room): PublicMessage[] {
 export function clearMessages(room: Room): void {
   room.messages.length = 0;
   for (const p of room.participants.values()) p.lastSeenMessageId = undefined;
+  void store.clearRoomMessages(room.id);
+  void store.publishRoom({ kind: "clear", roomId: room.id });
 }
 
 /** Update the read position for a participant. */
 export function setParticipantLastSeen(room: Room, participantId: string, messageId: string): void {
   const p = room.participants.get(participantId);
-  if (p) p.lastSeenMessageId = messageId;
+  if (p) {
+    p.lastSeenMessageId = messageId;
+    persistRoom(room);
+  }
 }
 
 /** Build the public (client-safe) representation of a room from a socket's view. */
@@ -391,3 +412,141 @@ export function allRooms(): Room[] {
 export function isExpired(room: Room): boolean {
   return Date.now() > room.expiresAt;
 }
+
+// ---------------------------------------------------------------------------
+// Shared store integration
+//
+// In memory mode every call below is a no-op, so single-instance behaviour is
+// unchanged. In Redis mode the same Maps act as a per-instance cache: mutations
+// go through to Redis and a pub/sub listener applies other instances' changes.
+// ---------------------------------------------------------------------------
+
+/** Remaining room lifetime in seconds for the message list TTL (0 = forever). */
+function ttlSeconds(room: Room): number {
+  if (room.persistent || !Number.isFinite(room.expiresAt)) return 0;
+  return Math.max(1, Math.floor((room.expiresAt - Date.now()) / 1000));
+}
+
+/**
+ * Persist meta + participants and broadcast the change. Messages are persisted
+ * separately by `appendMessage`, so the broadcast payload carries none of them.
+ */
+function persistRoom(room: Room): void {
+  void store.saveRoom({ ...snapshotRoom(room), messages: [] });
+}
+
+/** Append one message with the atomic cap + TTL trim, then tell other instances. */
+function persistMessage(room: Room, message: InternalMessage): void {
+  void store.appendMessage({
+    roomId: room.id,
+    message,
+    cap: getSettings().messageCap,
+    ttlSeconds: ttlSeconds(room),
+  });
+  void store.publishRoom({ kind: "message", roomId: room.id, message });
+}
+
+/** Trim a room's message list to the current rolling cap. */
+function capMessages(room: Room): void {
+  const cap = getSettings().messageCap;
+  if (room.messages.length > cap) room.messages.splice(0, room.messages.length - cap);
+}
+
+/**
+ * Copy remote metadata/participants/messages onto a cached room. Participants
+ * this instance still holds live sockets for are kept even if the snapshot no
+ * longer lists them (the local socket is the source of truth for its member).
+ */
+function applySnapshot(room: Room, snap: RoomSnapshot): void {
+  room.code = snap.code;
+  room.hostParticipantId = snap.hostParticipantId;
+  room.createdAt = snap.createdAt;
+  room.expiresAt = snap.persistent ? Number.POSITIVE_INFINITY : snap.expiresAt;
+  room.persistent = snap.persistent;
+  const next = new Map(snap.participants.map((p) => [p.id, { ...p }]));
+  for (const [, pid] of room.sockets) {
+    if (!next.has(pid)) {
+      const local = room.participants.get(pid);
+      if (local) next.set(pid, local);
+    }
+  }
+  room.participants = next;
+  const byId = new Map(room.messages.map((m) => [m.id, m]));
+  for (const m of snap.messages) if (!byId.has(m.id)) byId.set(m.id, { ...m });
+  room.messages = [...byId.values()].sort((a, b) => a.sentAt - b.sentAt);
+  capMessages(room);
+}
+
+/** Apply a room event another instance published. */
+function applyRemoteRoom(event: RoomEventEnvelope): void {
+  // Our own echo: this instance already applied the mutation locally.
+  if (event.origin === config.instanceId) return;
+  switch (event.kind) {
+    case "snapshot": {
+      const room = rooms.get(event.room.id);
+      // Only track rooms this instance actually has members in.
+      if (room) applySnapshot(room, event.room);
+      return;
+    }
+    case "message": {
+      const room = rooms.get(event.roomId);
+      const incoming = event.message as InternalMessage | undefined;
+      if (!room || !incoming || room.messages.some((m) => m.id === incoming.id)) return;
+      room.messages.push({ ...incoming });
+      capMessages(room);
+      return;
+    }
+    case "clear": {
+      const room = rooms.get(event.roomId);
+      if (!room) return;
+      room.messages.length = 0;
+      for (const p of room.participants.values()) p.lastSeenMessageId = undefined;
+      return;
+    }
+    case "seen": {
+      const p = rooms.get(event.roomId)?.participants.get(event.participantId);
+      if (p) p.lastSeenMessageId = event.messageId;
+      return;
+    }
+    case "rename": {
+      const p = rooms.get(event.roomId)?.participants.get(event.participantId);
+      if (p) p.name = event.name;
+      return;
+    }
+    case "delete": {
+      removeLocalRoom(event.id);
+      return;
+    }
+  }
+}
+store.on("room", applyRemoteRoom);
+
+/** Rebuild a room from a snapshot, or refresh it if already cached. */
+function hydrateRoom(snapshot: RoomSnapshot): Room {
+  const existing = rooms.get(snapshot.id);
+  if (existing) {
+    applySnapshot(existing, snapshot);
+    return existing;
+  }
+  const room = restoreRoom(snapshot);
+  rooms.set(room.id, room);
+  codeIndex.set(room.code, room);
+  return room;
+}
+
+/** Load a room by id, hitting Redis only on a cache miss. */
+export async function loadRoomFromStore(id: string): Promise<Room | undefined> {
+  const local = getRoom(id);
+  if (local) return local;
+  const snapshot = await store.loadRoom(id);
+  return snapshot ? hydrateRoom(snapshot) : undefined;
+}
+
+/** Load a room by code, hitting Redis only on a cache miss. */
+export async function loadRoomByCodeFromStore(code: string): Promise<Room | undefined> {
+  const local = getRoomByCode(code);
+  if (local) return local;
+  const snapshot = await store.loadRoomByCode(code);
+  return snapshot ? hydrateRoom(snapshot) : undefined;
+}
+
