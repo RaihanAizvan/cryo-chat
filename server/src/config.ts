@@ -6,6 +6,7 @@
  * dev and matches Abasthan's "env lives at the root" settings model. Real
  * deployments inject vars into process.env directly; the file is optional.
  */
+import { randomUUID } from "node:crypto";
 import dotenv from "dotenv";
 import { existsSync } from "node:fs";
 
@@ -69,6 +70,12 @@ export interface Config {
   redisPrefix: string;
   /** Max reconnect delay; a runaway backoff would stall recovery after a blip. */
   redisMaxRetryDelayMs: number;
+  /**
+   * Stable per-process id used to tag store events with their origin, so an
+   * instance can ignore its own pub/sub echo. Set INSTANCE_ID in a fleet;
+   * defaults to a fresh uuid per boot.
+   */
+  instanceId: string;
 }
 
 const list = (v: string | undefined): string[] =>
@@ -114,6 +121,7 @@ export const config: Config = {
   ),
   redisPrefix: process.env.REDIS_PREFIX ?? "cryo",
   redisMaxRetryDelayMs: Number(process.env.REDIS_MAX_RETRY_DELAY_MS ?? 3_000),
+  instanceId: process.env.INSTANCE_ID ?? randomUUID(),
 };
 
 /** True when a Redis backend is configured (memory mode is the default). */
