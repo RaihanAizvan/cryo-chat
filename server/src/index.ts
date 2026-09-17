@@ -9,9 +9,11 @@ import { config } from "./config.js";
 import { createHttpApp, attachClientStatic } from "./http.js";
 import { socketIoCors } from "./cors.js";
 import { attachHandlers, startSweeper } from "./handlers.js";
-import { destroy } from "./sessions.js";
-import { getSettings } from "./settings.js";
+import { destroy, loadFromStore as loadSessions } from "./sessions.js";
+import { loadFromStore as loadBans } from "./bans.js";
+import { getSettings, loadFromStore as loadSettings } from "./settings.js";
 import { mountAdminRoutes } from "./admin.js";
+import { store } from "./store.js";
 
 const app = createHttpApp();
 const server = http.createServer(app);
@@ -63,6 +65,13 @@ io.on("connection", (socket) => {
 
 startSweeper(io);
 
-server.listen(config.port, () => {
-  console.log(`[cryo] server listening on http://localhost:${config.port}`);
-});
+/** Boot: connect the shared store, seed caches from it, then listen. */
+async function main(): Promise<void> {
+  await store.init();
+  await Promise.all([loadSessions(), loadBans(), loadSettings()]);
+  server.listen(config.port, () => {
+    console.log(`[cryo] server listening on http://localhost:${config.port}`);
+  });
+}
+
+void main();
