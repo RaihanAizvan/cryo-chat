@@ -56,6 +56,19 @@ export interface Config {
   cloudinaryApiSecret: string;
   /** Unsigned upload preset the client uses to push files straight to Cloudinary. */
   cloudinaryUploadPreset: string;
+  /** Redis connection URL, e.g. redis://:password@host:6379/0. Empty = memory mode. */
+  redisUrl: string;
+  /** Alternatively, discrete Redis host (used when redisUrl is empty). */
+  redisHost: string;
+  redisPort: number;
+  redisPassword: string;
+  redisDb: number;
+  /** Use TLS for the Redis connection (managed providers usually need it). */
+  redisTls: boolean;
+  /** Namespace for every Redis key/channel so one Redis can host several apps. */
+  redisPrefix: string;
+  /** Max reconnect delay; a runaway backoff would stall recovery after a blip. */
+  redisMaxRetryDelayMs: number;
 }
 
 const list = (v: string | undefined): string[] =>
@@ -91,4 +104,17 @@ export const config: Config = {
   cloudinaryApiKey: process.env.CLOUDINARY_API_KEY ?? "",
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
   cloudinaryUploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET ?? "",
+  redisUrl: process.env.REDIS_URL ?? "",
+  redisHost: process.env.REDIS_HOST ?? "",
+  redisPort: Number(process.env.REDIS_PORT ?? 6379),
+  redisPassword: process.env.REDIS_PASSWORD ?? "",
+  redisDb: Number(process.env.REDIS_DB ?? 0),
+  redisTls: ["1", "true", "yes", "on"].includes(
+    (process.env.REDIS_TLS ?? "").toLowerCase(),
+  ),
+  redisPrefix: process.env.REDIS_PREFIX ?? "cryo",
+  redisMaxRetryDelayMs: Number(process.env.REDIS_MAX_RETRY_DELAY_MS ?? 3_000),
 };
+
+/** True when a Redis backend is configured (memory mode is the default). */
+export const redisConfigured = Boolean(config.redisUrl || config.redisHost);
