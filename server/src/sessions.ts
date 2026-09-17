@@ -17,6 +17,8 @@ import type { Socket } from "socket.io";
 import { normalizeName, randomDisplayName, colorFor } from "./util.js";
 import * as audit from "./audit.js";
 import { isBanned } from "./bans.js";
+import { store } from "./store.js";
+import type { SessionEvent } from "./store.js";
 
 export interface Session {
   id: string;
@@ -30,6 +32,35 @@ const sessions = new Map<Socket["id"], Session>();
 
 /** Issued identities: session.id -> session. Survives disconnects. */
 const identities = new Map<string, Session>();
+
+/**
+ * Session identities are stored in Redis (when configured) as the durable
+ * copy. The Map above is a per-instance cache: reads stay synchronous and fast,
+ * writes go through to Redis, and changes made on other instances arrive over
+ * pub/sub via this listener.
+ */
+function applyRemoteSession(event: SessionEvent): void {
+  if (event.kind === "upsert") {
+    const existing = identities.get(event.session.id);
+    if (existing) {
+      existing.name = event.session.name;
+      existing.color = event.session.color;
+    } else {
+      identities.set(event.session.id, { ...event.session });
+    }
+  } else {
+    identities.delete(event.id);
+  }
+}
+store.on("session", applyRemoteSession);
+
+/** Seed the identity cache from the durable copy (run once at boot). */
+export async function loadFromStore(): Promise<void> {
+  const rows = await store.loadSessions();
+  for (const s of rows) {
+    if (!identities.has(s.id)) identities.set(s.id, s);
+  }
+}
 
 /** Only UUID-shaped ids are accepted for resume (avoids spoofing). */
 const UUID_RE =
@@ -68,6 +99,7 @@ export function getSession(socket: Socket, requestedId?: unknown): Session {
   session.color = colorFor(session.name);
   identities.set(session.id, session);
   sessions.set(socket.id, session);
+  void store.saveSession(session);
   pruneIdentities();
   audit.record({
     kind: "session:created",
@@ -84,6 +116,7 @@ export function updateName(socket: Socket, raw: unknown): Session | null {
   if (!name) return null;
   existing.name = name;
   existing.color = colorFor(name);
+  void store.saveSession(existing);
   return existing;
 }
 
@@ -99,6 +132,7 @@ function pruneIdentities(): void {
   for (const [id, s] of identities) {
     if (now - s.createdAt > IDENTITY_TTL_MS || identities.size > IDENTITY_MAX) {
       identities.delete(id);
+      void store.deleteSession(id);
     }
   }
 }
@@ -121,5 +155,6 @@ export function allBindings(): Map<Socket["id"], Session> {
 /** Drop a stored identity entirely (admin user purge — disables resume). */
 export function deleteIdentity(id: string): boolean {
   if (!UUID_RE.test(id)) return false;
+  void store.deleteSession(id);
   return identities.delete(id);
 }
