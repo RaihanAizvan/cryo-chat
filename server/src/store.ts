@@ -88,6 +88,22 @@ export interface Store {
 
   /** Sliding-window check. Returns true when the call is allowed. */
   rateLimit(key: string, limit: number, windowMs: number): Promise<boolean>;
+
+  /**
+   * Atomically reserve `code` for `roomId`. False when the code is already
+   * claimed by another room (single instances rely on the local index).
+   */
+  claimCode(code: string, roomId: string): Promise<boolean>;
+  /** Drop a code claim (room deleted or code reassigned). */
+  releaseClaim(code: string): Promise<void>;
+
+  /** Room ids a session is currently seated in (cluster resume). */
+  sessionRooms(sessionId: string): Promise<string[]>;
+  addSessionRoom(sessionId: string, roomId: string): Promise<void>;
+  removeSessionRoom(sessionId: string, roomId: string): Promise<void>;
+
+  /** Single-winner lock so only one instance broadcasts a room's expiry. */
+  acquireExpiryLock(roomId: string): Promise<boolean>;
 }
 
 type Handlers = Partial<Record<keyof StoreEvents, Array<(payload: unknown) => void>>>;
@@ -131,6 +147,21 @@ class MemoryStore implements Store {
     b.count += 1;
     return true;
   }
+
+  async claimCode(): Promise<boolean> {
+    return true;
+  }
+  async releaseClaim(): Promise<void> {}
+
+  async sessionRooms(): Promise<string[]> {
+    return [];
+  }
+  async addSessionRoom(): Promise<void> {}
+  async removeSessionRoom(): Promise<void> {}
+
+  async acquireExpiryLock(): Promise<boolean> {
+    return true;
+  }
 }
 
 /**
@@ -163,6 +194,38 @@ redis.call('PEXPIRE', key, window)
 return 1
 `;
 
+/** Single-winner lease for room expiry broadcasts (SET NX PX). */
+const EXPIRE_LOCK_SCRIPT = `
+local ok = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', tonumber(ARGV[2]))
+if ok then return 1 end
+return 0
+`;
+
+/**
+ * Build a Redis connection using the shared retry/backoff policy. The store
+ * uses two (commands + subscriber); index.ts uses another pair for the
+ * Socket.IO adapter, so they stay in one place.
+ */
+export function createRedisClient(): Redis {
+  const opts: RedisOptions = {
+    // Bounded backoff: retry quickly, but never wait longer than configured so
+    // a network blip recovers promptly instead of stalling for minutes.
+    maxRetriesPerRequest: 2,
+    retryStrategy: (times: number) =>
+      Math.min(times * 200, config.redisMaxRetryDelayMs),
+  };
+  return config.redisUrl
+    ? new Redis(config.redisUrl, opts)
+    : new Redis({
+        ...opts,
+        host: config.redisHost,
+        port: config.redisPort,
+        password: config.redisPassword || undefined,
+        db: config.redisDb,
+        ...(config.redisTls ? { tls: {} } : {}),
+      });
+}
+
 class RedisStore implements Store {
   readonly mode: StoreMode = "redis";
   private cmd: Redis;
@@ -172,26 +235,8 @@ class RedisStore implements Store {
 
   constructor() {
     this.p = config.redisPrefix;
-    // Bounded backoff: retry quickly, but never wait longer than configured so
-    // a network blip recovers promptly instead of stalling for minutes.
-    const opts: RedisOptions = {
-      maxRetriesPerRequest: 2,
-      retryStrategy: (times: number) =>
-        Math.min(times * 200, config.redisMaxRetryDelayMs),
-    };
-    const make = (): Redis =>
-      config.redisUrl
-        ? new Redis(config.redisUrl, opts)
-        : new Redis({
-            ...opts,
-            host: config.redisHost,
-            port: config.redisPort,
-            password: config.redisPassword || undefined,
-            db: config.redisDb,
-            ...(config.redisTls ? { tls: {} } : {}),
-          });
-    this.cmd = make();
-    this.sub = make();
+    this.cmd = createRedisClient();
+    this.sub = createRedisClient();
   }
 
   private channel(scope: string): string {
@@ -254,6 +299,12 @@ class RedisStore implements Store {
   }
   private codeKey(code: string): string {
     return `${this.p}:code:${code}`;
+  }
+  private sessionRoomsKey(sessionId: string): string {
+    return `${this.p}:session:${sessionId}:rooms`;
+  }
+  private expiryLockKey(roomId: string): string {
+    return `${this.p}:room:${roomId}:expiry-lock`;
   }
 
   async loadSessions(): Promise<Session[]> {
@@ -431,6 +482,44 @@ class RedisStore implements Store {
       String(windowMs),
       String(limit),
       member,
+    );
+    return Number(res) === 1;
+  }
+
+  async claimCode(code: string, roomId: string): Promise<boolean> {
+    return (await this.cmd.setnx(this.codeKey(code), roomId)) === 1;
+  }
+
+  async releaseClaim(code: string): Promise<void> {
+    await this.cmd.del(this.codeKey(code));
+  }
+
+  async sessionRooms(sessionId: string): Promise<string[]> {
+    return this.cmd.smembers(this.sessionRoomsKey(sessionId));
+  }
+
+  async addSessionRoom(sessionId: string, roomId: string): Promise<void> {
+    await this.cmd
+      .multi()
+      .sadd(this.sessionRoomsKey(sessionId), roomId)
+      // TTL mirrors the session identity lifetime, so stale entries clear out.
+      .expire(this.sessionRoomsKey(sessionId), 60 * 60 * 24 * 7)
+      .exec();
+  }
+
+  async removeSessionRoom(sessionId: string, roomId: string): Promise<void> {
+    await this.cmd.srem(this.sessionRoomsKey(sessionId), roomId);
+  }
+
+  async acquireExpiryLock(roomId: string): Promise<boolean> {
+    const res = await this.cmd.eval(
+      EXPIRE_LOCK_SCRIPT,
+      1,
+      this.expiryLockKey(roomId),
+      config.instanceId,
+      // Room messages TTLs outlive the sweep window; a long enough lease keeps
+      // only the single winner broadcasting `room:expired` cluster-wide.
+      "60000",
     );
     return Number(res) === 1;
   }
