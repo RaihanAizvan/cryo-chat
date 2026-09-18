@@ -50,7 +50,29 @@ export interface Room {
   messages: InternalMessage[];
 }
 
+/**
+ * A JSON-safe copy of a room, used to persist to Redis and to ship to other
+ * instances. `persistent` rooms serialize `expiresAt` as 0 because JSON has no
+ * Infinity (same trick the public room view uses).
+ */
+export interface RoomSnapshot {
+  id: string;
+  code: string;
+  hostParticipantId: string;
+  createdAt: number;
+  expiresAt: number;
+  persistent: boolean;
+  participants: Participant[];
+  messages: InternalMessage[];
+}
+
 const rooms = new Map<string, Room>();
+
+/**
+ * code -> room index. `getRoomByCode` used to scan every room, which is O(n) on
+ * the hottest join path; an index makes it O(1) and keeps large instances fast.
+ */
+const codeIndex = new Map<string, Room>();
 
 export interface CreateRoomOptions {
   code?: string;
@@ -77,11 +99,45 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
   };
   // Guard against a (vanishingly rare) id collision.
   while (rooms.has(room.id)) room.id = randomRoomId();
-  // A random code must never shadow the preserved reserved code.
-  while (!options.code && isReservedCode(room.code)) {
-    room.code = randomRoomCode();
+  // A random code must never shadow the preserved reserved code, and two live
+  // rooms must not share a code (the join path resolves by code).
+  if (!options.code) {
+    while (isReservedCode(room.code) || codeIndex.has(room.code)) {
+      room.code = randomRoomCode();
+    }
   }
   rooms.set(id, room);
+  codeIndex.set(room.code, room);
+  return room;
+}
+
+/** Take a JSON-safe copy of a room for Redis / cross-instance transport. */
+export function snapshotRoom(room: Room): RoomSnapshot {
+  return {
+    id: room.id,
+    code: room.code,
+    hostParticipantId: room.hostParticipantId,
+    createdAt: room.createdAt,
+    expiresAt: room.persistent ? 0 : room.expiresAt,
+    persistent: room.persistent,
+    participants: [...room.participants.values()].map((p) => ({ ...p })),
+    messages: room.messages.map((m) => ({ ...m })),
+  };
+}
+
+/** Rebuild a live room from a snapshot (Redis hydration / remote update). */
+export function restoreRoom(snapshot: RoomSnapshot): Room {
+  const room: Room = {
+    id: snapshot.id,
+    code: snapshot.code,
+    hostParticipantId: snapshot.hostParticipantId,
+    createdAt: snapshot.createdAt,
+    expiresAt: snapshot.persistent ? Number.POSITIVE_INFINITY : snapshot.expiresAt,
+    persistent: snapshot.persistent,
+    participants: new Map(snapshot.participants.map((p) => [p.id, { ...p }])),
+    sockets: new Map(),
+    messages: snapshot.messages.map((m) => ({ ...m })),
+  };
   return room;
 }
 
@@ -95,15 +151,13 @@ export function getRoom(id: string): Room | undefined {
 }
 
 export function getRoomByCode(code: string): Room | undefined {
-  for (const room of rooms.values()) {
-    if (room.code !== code) continue;
-    if (Date.now() > room.expiresAt) {
-      deleteRoom(room.id);
-      return undefined;
-    }
-    return room;
+  const room = codeIndex.get(code);
+  if (!room) return undefined;
+  if (Date.now() > room.expiresAt) {
+    deleteRoom(room.id);
+    return undefined;
   }
-  return undefined;
+  return room;
 }
 
 /**
@@ -121,6 +175,8 @@ export function getOrCreateReservedRoom(): Room | undefined {
 }
 
 export function deleteRoom(id: string): boolean {
+  const room = rooms.get(id);
+  if (room && codeIndex.get(room.code) === room) codeIndex.delete(room.code);
   return rooms.delete(id);
 }
 

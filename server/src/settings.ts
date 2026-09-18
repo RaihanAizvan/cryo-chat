@@ -9,6 +9,7 @@
 
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
 import { config } from "./config.js";
+import { store } from "./store.js";
 
 export interface SettingsDict {
   maxMessageLength: number;
@@ -64,6 +65,22 @@ function base(): SettingsDict {
 }
 
 let current: SettingsDict = base();
+
+/**
+ * Admin overrides are persisted to Redis (when configured). Any change made on
+ * one instance is broadcast and applied here, so all instances agree on the
+ * same effective settings without holding the read path hostage to the network.
+ */
+function applyRemoteSettings(next: SettingsDict): void {
+  current = { ...next };
+}
+store.on("settings", applyRemoteSettings);
+
+/** Seed the current settings from the durable copy (run once at boot). */
+export async function loadFromStore(): Promise<void> {
+  const persisted = await store.loadSettings();
+  if (persisted) current = { ...persisted };
+}
 
 export function getSettings(): Readonly<SettingsDict> {
   return current;
@@ -137,6 +154,7 @@ export function updateSettings(patch: Record<string, unknown>): { ok: true; sett
 
   if (errors.length > 0) return { ok: false, error: errors.join(" ") };
   current = next;
+  void store.saveSettings(current);
   return { ok: true, settings: current };
 }
 

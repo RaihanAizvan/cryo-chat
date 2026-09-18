@@ -9,10 +9,22 @@ import { io as createClient } from "socket.io-client";
 const BASE = process.argv[2] ?? "http://localhost:4567";
 const KEY = process.argv[3] ?? "test-admin-key";
 
+// Fail fast on the first assertion error: close the sockets so Node can exit,
+// and stop the script instead of lingering on a never-resolving promise (that
+// would burn CI's whole job budget waiting on the 'timeout' wrapper).
 const fail = (msg) => {
   console.error(`✗ ${msg}`);
-  process.exitCode = 1;
+  try {
+    alice?.disconnect();
+    bob?.disconnect();
+  } catch {
+    /* sockets may not exist yet */
+  }
+  process.exit(1);
 };
+
+let alice;
+let bob;
 
 const ok = (msg) => console.log(`✓ ${msg}`);
 
@@ -70,17 +82,25 @@ const assert = (cond, msg) => (cond ? ok(msg) : fail(msg));
 
 // 2) Socket flow: alice creates room, bob joins, both send
 const baseSocketIo = "socket.io"; // path default
-const connect = () => new Promise((resolve, reject) => {
-  const s = createClient(BASE, { path: "/socket.io", transports: ["websocket"] });
-  s.on("connect", () => resolve(s));
-  s.on("connect_error", reject);
-});
-
-const alice = await connect();
-const bob = await connect();
 const ids = {};
-alice.on("session:init", (d) => (ids.alice = d.sessionId));
-bob.on("session:init", (d) => (ids.bob = d.sessionId));
+// Resolve only after session:init so the session ids below are always
+// available. The server can emit init in the same tick as 'connect'; a
+// listener attached afterwards racelessly misses it (last time that happened,
+// kick+mban had no participantId → 400 → the suite hung).
+const connect = (name) =>
+  new Promise((resolve, reject) => {
+    const s = createClient(BASE, { path: "/socket.io", transports: ["websocket"] });
+    const timer = setTimeout(() => reject(new Error(`${name}: session:init timeout`)), 5000);
+    s.on("connect_error", reject);
+    s.on("session:init", (d) => {
+      clearTimeout(timer);
+      ids[name] = d.sessionId;
+      resolve(s);
+    });
+  });
+
+alice = await connect("alice");
+bob = await connect("bob");
 const aliceRoom = new Promise((resolve) => {
   alice.once("room:joined", (d) => resolve(d.room));
 });
