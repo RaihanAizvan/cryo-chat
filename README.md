@@ -68,7 +68,7 @@ The full guide is in [`DEPLOYMENT.md`](DEPLOYMENT.md). Quick version:
 
   
 
-- **Easiest:** one **Abasthan** app serving both frontend + backend. Root `./`, build `npm install && npm run build`, start `npm start`.
+- **Easiest:** one **Abasthan** or **Render** app serving both frontend + backend. Root `./`, build `npm install && npm run build`, start `npm start` (Render: use the bundled `render.yaml`).
 
 - **Alternative:** frontend on **Vercel** (`client/` folder), backend on **Abasthan**, connected with `VITE_SERVER_URL` + `CORS_ORIGIN`.
 
@@ -76,7 +76,7 @@ The backend holds everything **in memory** — there's no database. That's what 
 
   
 
-Because sockets + in-memory rooms need a **persistent** process, the backend runs on **Abasthan** (not serverless). In the usual setup, the backend also serves the built frontend, so the whole thing lives on one URL. Details in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+Because sockets + in-memory rooms need a **persistent** process, the backend runs on a persistent Node host (not serverless): **Abasthan** or **Render**. In the usual setup, the backend also serves the built frontend, so the whole thing lives on one URL. Details in [`DEPLOYMENT.md`](DEPLOYMENT.md).
   
 
 Both already work out of the box.
@@ -116,7 +116,7 @@ The trade-off, honestly: it's not for stuff you need to keep. It's for the here-
 
 - **Tooling:** npm workspaces, tsx, concurrently
 
-- **Hosting:** Abasthan (and Vercel if you split it)
+- **Hosting:** Abasthan or Render (and Vercel if you split it)
 
   
 
