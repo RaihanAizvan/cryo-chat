@@ -61,6 +61,17 @@ export interface AppendMessageInput {
   ttlSeconds: number;
 }
 
+/**
+ * Lightweight room summary for the lobby: existence, member count and expiry —
+ * the fields beside a room's recent-rooms entry, nothing heavier.
+ */
+export interface RoomStatus {
+  exists: boolean;
+  participantCount: number;
+  expiresAt: number;
+  persistent: boolean;
+}
+
 export interface Store {
   readonly mode: StoreMode;
   /** Connect (Redis) and seed the module caches from the durable copy. */
@@ -85,11 +96,25 @@ export interface Store {
   loadRoom(id: string): Promise<RoomSnapshot | null>;
   /** Hydrate a room by its current code (join by code without caching all). */
   loadRoomByCode(code: string): Promise<RoomSnapshot | null>;
+  /**
+   * Cheap per-room status (exists, participant count, expiry) WITHOUT reading
+   * the participant list or message log — the lobby's recent-rooms list used
+   * to pay a full snapshot read per saved room.
+   */
+  loadRoomStatuses(codes: string[]): Promise<RoomStatus[]>;
   saveRoom(room: RoomSnapshot): Promise<void>;
   deleteRoom(id: string): Promise<void>;
   appendMessage(input: AppendMessageInput): Promise<void>;
   /** Drop a room's persisted message list (room:clear). */
   clearRoomMessages(roomId: string): Promise<void>;
+  /** Drop a room's persisted read positions (paired with message clear). */
+  clearRoomSeen(roomId: string): Promise<void>;
+  /**
+   * Persist one participant's read position with a single HSET instead of
+   * rewriting the whole room. Read receipts fire per recipient per message, so
+   * this is the single biggest Redis command sink in the hot path.
+   */
+  setParticipantSeen(roomId: string, participantId: string, messageId: string): Promise<void>;
   publishRoom(event: RoomEvent): Promise<void>;
 
   /** Sliding-window check. Returns true when the call is allowed. */
@@ -143,10 +168,15 @@ class MemoryStore implements Store {
   async loadRoomByCode(): Promise<RoomSnapshot | null> {
     return null;
   }
+  async loadRoomStatuses(): Promise<RoomStatus[]> {
+    return [];
+  }
   async saveRoom(): Promise<void> {}
   async deleteRoom(): Promise<void> {}
   async appendMessage(): Promise<void> {}
   async clearRoomMessages(): Promise<void> {}
+  async clearRoomSeen(): Promise<void> {}
+  async setParticipantSeen(): Promise<void> {}
   async publishRoom(): Promise<void> {}
   private buckets = new Map<string, { count: number; resetAt: number }>();
   async rateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
@@ -310,6 +340,9 @@ class RedisStore implements Store {
   private roomMessages(id: string): string {
     return `${this.p}:room:${id}:m`;
   }
+  private roomSeen(id: string): string {
+    return `${this.p}:room:${id}:seen`;
+  }
   private codeKey(code: string): string {
     return `${this.p}:code:${code}`;
   }
@@ -391,10 +424,11 @@ class RedisStore implements Store {
 
   /** Read and decode one room's meta/participants/messages from Redis. */
   private async readRoom(id: string): Promise<RoomSnapshot | null> {
-    const [meta, people, messages] = await Promise.all([
+    const [meta, people, messages, seen] = await Promise.all([
       this.cmd.hgetall(this.roomKey(id)),
       this.cmd.hgetall(this.roomPeople(id)),
       this.cmd.lrange(this.roomMessages(id), 0, -1),
+      this.cmd.hgetall(this.roomSeen(id)),
     ]);
     // A stale index entry (room expired, keys gone) is simply skipped.
     if (!meta || !meta.code) return null;
@@ -406,7 +440,13 @@ class RedisStore implements Store {
       createdAt: Number(meta.createdAt ?? 0),
       expiresAt: persistent ? 0 : Number(meta.expiresAt ?? 0),
       persistent,
-      participants: Object.values(people).map((j) => JSON.parse(j)),
+      participants: Object.values(people).map((j) => {
+        const p = JSON.parse(j) as { id: string; lastSeenMessageId?: string };
+        // Read positions live in the room:seen hash (single authoritative HSET
+        // per update); merge the freshest value onto the cached participant.
+        const seenId = seen[p.id];
+        return { ...p, lastSeenMessageId: seenId || p.lastSeenMessageId } as RoomSnapshot["participants"][number];
+      }),
       messages: messages.map((j) => JSON.parse(j)),
     };
   }
@@ -433,6 +473,57 @@ class RedisStore implements Store {
     // forever; clear it so the code can be recreated.
     if (!room) await this.cmd.del(this.codeKey(code));
     return room;
+  }
+
+  /**
+   * Lobby status for many codes in two pipelined round-trips (GET code -> id,
+   * then HGETALL meta + HLEN people per room). Omits the participant list and
+   * the whole message log that a full `readRoom` would fetch.
+   */
+  async loadRoomStatuses(codes: string[]): Promise<RoomStatus[]> {
+    const out: RoomStatus[] = codes.map(() => ({
+      exists: false,
+      participantCount: 0,
+      expiresAt: 0,
+      persistent: false,
+    }));
+    if (codes.length === 0) return out;
+
+    const resolve = this.cmd.pipeline();
+    for (const code of codes) resolve.get(this.codeKey(code));
+    const resolved = (await resolve.exec()) ?? [];
+
+    const roomsById: Array<{ index: number; id: string }> = [];
+    resolved.forEach((row, index) => {
+      const id = row?.[1] as string | undefined;
+      if (id) roomsById.push({ index, id });
+    });
+    if (roomsById.length === 0) return out;
+
+    const fetch = this.cmd.pipeline();
+    for (const { id } of roomsById) {
+      fetch.hgetall(this.roomKey(id));
+      fetch.hlen(this.roomPeople(id));
+    }
+    const rows = (await fetch.exec()) ?? [];
+
+    roomsById.forEach(({ index, id }, n) => {
+      const meta = (rows?.[n * 2]?.[1] ?? {}) as Record<string, string>;
+      // Mirrors loadRoomByCode: a claim whose room keys already expired would
+      // otherwise pin the code forever — clear it so the code is recreateable.
+      if (!meta || !meta.code) {
+        void this.cmd.del(this.codeKey(codes[index]));
+        return;
+      }
+      const persistent = meta.persistent === "1";
+      out[index] = {
+        exists: true,
+        participantCount: Number(rows?.[n * 2 + 1]?.[1] ?? 0),
+        expiresAt: persistent ? Number.MAX_SAFE_INTEGER : Number(meta.expiresAt ?? 0),
+        persistent,
+      };
+    });
+    return out;
   }
 
   async saveRoom(room: RoomSnapshot): Promise<void> {
@@ -463,11 +554,13 @@ class RedisStore implements Store {
       tx.expire(this.roomKey(id), ttl)
         .expire(this.roomPeople(id), ttl)
         .expire(this.roomMessages(id), ttl)
+        .expire(this.roomSeen(id), ttl)
         .expire(this.codeKey(room.code), ttl);
     } else {
       tx.persist(this.roomKey(id))
         .persist(this.roomPeople(id))
         .persist(this.roomMessages(id))
+        .persist(this.roomSeen(id))
         .persist(this.codeKey(room.code));
     }
     await tx.exec();
@@ -481,6 +574,7 @@ class RedisStore implements Store {
       .del(this.roomKey(id))
       .del(this.roomPeople(id))
       .del(this.roomMessages(id))
+      .del(this.roomSeen(id))
       .srem(`${this.p}:rooms`, id);
     if (code) tx.del(this.codeKey(code));
     await tx.exec();
@@ -507,6 +601,26 @@ class RedisStore implements Store {
 
   async clearRoomMessages(roomId: string): Promise<void> {
     await this.cmd.del(this.roomMessages(roomId));
+  }
+
+  async clearRoomSeen(roomId: string): Promise<void> {
+    await this.cmd.del(this.roomSeen(roomId));
+  }
+
+  /**
+   * Read receipt: one HSET into the room:seen hash (kept warm by the key's
+   * existing TTL) instead of rewriting the entire room. The live update still
+   * fans out to other instances via the room event channel.
+   */
+  async setParticipantSeen(roomId: string, participantId: string, messageId: string): Promise<void> {
+    await this.cmd
+      .multi()
+      .hset(this.roomSeen(roomId), { [participantId]: messageId })
+      // Safety net: the room hash's own TTL governs this key too, but if only
+      // seen events flew since the last saveRoom a runaway key would linger.
+      .expire(this.roomSeen(roomId), 60 * 60 * 24 * 7)
+      .exec();
+    await this.publishRoom({ kind: "seen", roomId, participantId, messageId });
   }
 
   async rateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
