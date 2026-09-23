@@ -238,36 +238,54 @@ export function attachHandlers(io: Server, socket: Socket): void {
   });
 
   // Home screen: current status of a handful of saved rooms (live participant
-  // counts, open vs closed). Used by the recent-rooms list to stay truthful.
+  // counts, open vs closed). Cache hits answer instantly; the misses go out in
+  // ONE pipelined round-trip that never reads participant lists or messages.
   socket.on("room:status", async (raw) => {
     const refs: RoomRef[] = Array.isArray(raw?.refs) ? raw.refs : [];
-    const statuses = [];
+    const statuses: Array<{
+      code?: string;
+      roomId?: string;
+      exists: boolean;
+      participantCount: number;
+      expiresAt: number;
+      persistent: boolean;
+    }> = [];
+    const byCode: Array<{ refIndex: number; code: string }> = [];
+
     for (const ref of refs.slice(0, 30)) {
-      const code = typeof ref?.code === "string" ? normalizeCode(ref.code) : undefined;
+      const code = typeof ref?.code === "string" ? (normalizeCode(ref.code) ?? undefined) : undefined;
       const roomId = typeof ref?.roomId === "string" ? ref.roomId : undefined;
       // Resolve by code first: codes are unique among live rooms and survive
       // room re-creation, while a saved roomId can go stale (e.g. 9999 after
       // it is recreated). Falling back to the id covers deep-link refs.
-      const room = code
-        ? isReservedCode(code)
-          ? await rooms.getOrCreateReservedRoomClaimed()
-          : await rooms.loadRoomByCodeFromStore(code)
-        : roomId
-          ? await rooms.loadRoomFromStore(roomId)
-          : undefined;
-      if (!room) {
-        statuses.push({ code, roomId, exists: false, participantCount: 0, expiresAt: 0, persistent: false });
+      let room: rooms.Room | undefined;
+      if (code && isReservedCode(code)) room = await rooms.getOrCreateReservedRoomClaimed();
+      else if (code) room = rooms.getRoomByCode(code);
+      else if (roomId) room = rooms.getRoom(roomId);
+      if (room) {
+        statuses.push({ code, roomId, ...rooms.roomStatusView(room) });
         continue;
       }
-      statuses.push({
-        code: room.code,
-        roomId: room.id,
-        exists: true,
-        participantCount: room.participants.size,
-        expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
-        persistent: room.persistent,
-      });
+      const refIndex = statuses.length;
+      statuses.push({ code, roomId, exists: false, participantCount: 0, expiresAt: 0, persistent: false });
+      if (code) byCode.push({ refIndex, code });
     }
+
+    if (byCode.length > 0) {
+      const stored = await store.loadRoomStatuses(byCode.map((m) => m.code));
+      for (let i = 0; i < byCode.length; i++) {
+        statuses[byCode[i].refIndex] = { ...statuses[byCode[i].refIndex], ...stored[i] };
+      }
+    }
+
+    // roomId-only deep-links that missed the cache still hydrate individually —
+    // rare, and a full read is the correct cost when there's no code to locate.
+    for (const status of statuses) {
+      if (status.exists || status.code || !status.roomId) continue;
+      const room = await rooms.loadRoomFromStore(status.roomId);
+      if (room) Object.assign(status, rooms.roomStatusView(room));
+    }
+
     socket.emit("room:status:result", { statuses });
   });
 

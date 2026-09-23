@@ -20,7 +20,7 @@ import type {
 import { randomRoomCode, randomRoomId } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
 import { store } from "./store.js";
-import type { RoomEventEnvelope } from "./store.js";
+import type { RoomEventEnvelope, RoomStatus } from "./store.js";
 import { config } from "./config.js";
 
 interface InternalMessage {
@@ -413,6 +413,20 @@ export function toPublicRoom(room: Room, socketId: string, hostParticipantId: st
 /** All rooms (used by the sweep). */
 export function allRooms(): Room[] {
   return [...rooms.values()];
+}
+
+/**
+ * Lobby-facing room summary — exists, headcount, expiry. Mirrors the shape of
+ * `store.loadRoomStatuses()` so the handler can mix cache hits and pipelined
+ * store reads into one result list without distinguishing their source.
+ */
+export function roomStatusView(room: Room): RoomStatus {
+  return {
+    exists: true,
+    participantCount: room.participants.size,
+    expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+    persistent: room.persistent,
+  };
 }
 
 export function isExpired(room: Room): boolean {
