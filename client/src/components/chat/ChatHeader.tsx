@@ -3,7 +3,7 @@ import type { PublicRoom, Participant } from "@cryo/shared";
 import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX, IconEdit, IconTrash } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
-import { roomShareLink } from "./ShareRoom";
+import { roomShareLink } from "../../lib/shareLink";
 import { getStoredPeer, storePeer, type StoredPeer } from "../../lib/peer";
 
 function formatLastSeen(ts: number): string {

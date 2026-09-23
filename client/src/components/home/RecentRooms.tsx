@@ -10,7 +10,7 @@ import { timeAgo } from "../../lib/format";
 import { useNow } from "../../hooks/useNow";
 import { Avatar } from "../ui/Avatar";
 import { IconX, IconCheck, IconLink } from "../ui/Icon";
-import { roomShareLink } from "../chat/ShareRoom";
+import { roomShareLink } from "../../lib/shareLink";
 
 interface Props {
   onJoin: (code: string) => void;
