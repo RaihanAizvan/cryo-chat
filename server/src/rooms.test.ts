@@ -16,11 +16,13 @@ import {
   getMessages,
   clearMessages,
   setParticipantLastSeen,
+  roomStatusView,
   toPublicRoom,
   allRooms,
   isExpired,
   type Room,
 } from "./rooms";
+import { store as storeModule } from "./store";
 import { updateSettings, getSettings } from "./settings";
 import { normalizeReservedCode } from "./settings";
 
@@ -249,6 +251,38 @@ describe("addMessage / addSystemMessage / getMessages", () => {
     clearMessages(room);
     expect(getMessages(room)).toEqual([]);
     expect(room.participants.get("host-id")?.lastSeenMessageId).toBeUndefined();
+  });
+});
+
+describe("roomStatusView", () => {
+  it("mirrors the persistent/summary shape used by the lobby poller", () => {
+    const room = setupRoom();
+    addParticipant(room, fakeSocket("s2"), "p2", "Second", 0);
+    const view = roomStatusView(room);
+    expect(view).toEqual({
+      exists: true,
+      participantCount: 2,
+      expiresAt: room.expiresAt,
+      persistent: room.persistent,
+    });
+  });
+
+  it("reports persistent rooms as never expiring (matching toPublicRoom)", () => {
+    const room = createRoom({ code: "9999" });
+    addParticipant(room, fakeSocket("s1"), "p1", "A", 0);
+    expect(roomStatusView(room).expiresAt).toBe(Number.MAX_SAFE_INTEGER);
+    expect(roomStatusView(room).persistent).toBe(true);
+  });
+});
+
+describe("seen handling (lightweight receipt path)", () => {
+  it("setParticipantLastSeen updates memory and delegates to the store, no saveRoom", () => {
+    const room = setupRoom();
+    const seenSpy = vi.spyOn(storeModule, "setParticipantSeen").mockResolvedValue(undefined);
+    setParticipantLastSeen(room, "host-id", "m-1");
+    expect(room.participants.get("host-id")?.lastSeenMessageId).toBe("m-1");
+    expect(seenSpy).toHaveBeenCalledWith(room.id, "host-id", "m-1");
+    seenSpy.mockRestore();
   });
 });
 
