@@ -81,7 +81,6 @@ const assert = (cond, msg) => (cond ? ok(msg) : fail(msg));
 }
 
 // 2) Socket flow: alice creates room, bob joins, both send
-const baseSocketIo = "socket.io"; // path default
 const ids = {};
 // Resolve only after session:init so the session ids below are always
 // available. The server can emit init in the same tick as 'connect'; a
@@ -116,7 +115,6 @@ bob.emit("room:join", { code: created.code });
 await bobRoom;
 ok(`bob joined ${created.code}`);
 
-const aliceName = alice.id; // placeholder
 const bobAckRecv = new Promise((resolve) => bob.once("message:new", (d) => resolve(d)));
 alice.emit("message:send", { roomId: created.id, text: "hello admin", clientId: "e2e-1" });
 await bobAckRecv;
