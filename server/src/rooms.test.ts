@@ -16,6 +16,7 @@ import {
   getMessages,
   clearMessages,
   setParticipantLastSeen,
+  loadAllRoomsFromStore,
   toPublicRoom,
   allRooms,
   isExpired,
@@ -249,6 +250,15 @@ describe("addMessage / addSystemMessage / getMessages", () => {
     clearMessages(room);
     expect(getMessages(room)).toEqual([]);
     expect(room.participants.get("host-id")?.lastSeenMessageId).toBeUndefined();
+  });
+});
+
+describe("loadAllRoomsFromStore (admin live view, memory mode)", () => {
+  it("lists live local rooms instead of ignoring them", async () => {
+    const room = createRoom();
+    addParticipant(room, fakeSocket("sock-host"), "host-id", "Host", 0);
+    const rooms = await loadAllRoomsFromStore();
+    expect(rooms.map((r) => r.id)).toContain(room.id);
   });
 });
 

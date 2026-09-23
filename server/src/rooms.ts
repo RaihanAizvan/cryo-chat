@@ -21,6 +21,7 @@ import { randomRoomCode, randomRoomId } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
 import { store } from "./store.js";
 import type { RoomEventEnvelope } from "./store.js";
+import { redisMode } from "./store.js";
 import { config } from "./config.js";
 
 interface InternalMessage {
@@ -555,8 +556,11 @@ export async function loadRoomByCodeFromStore(code: string): Promise<Room | unde
   return snapshot ? hydrateRoom(snapshot) : undefined;
 }
 
-/** All live rooms across the cluster (admin live view). */
+/** All live rooms for admin views. Single instance: the local cache — the
+ * shared store has nothing to add. Cluster: list from the shared store and
+ * hydrate each into this instance's cache. */
 export async function loadAllRoomsFromStore(): Promise<Room[]> {
+  if (!redisMode()) return allRooms().filter((r) => !isExpired(r));
   const snaps = await store.loadRooms();
   return snaps.map(hydrateRoom).filter((r) => !isExpired(r));
 }
