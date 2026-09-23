@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
 import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX, IconEdit, IconTrash } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
@@ -59,31 +59,35 @@ export function ChatHeader({
   // other person joins — a ref mutation alone would never repaint the header.
   // Seeded + persisted to localStorage so "last seen" survives leaving,
   // rejoining, and page reloads.
-  const initialPeer = useMemo(
-    () => (room.persistent ? getStoredPeer(room.code) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+  const [peer, setPeer] = useState<StoredPeer | null>(() =>
+    room.persistent ? getStoredPeer(room.code) : null,
   );
-  const [peer, setPeer] = useState<StoredPeer | null>(initialPeer);
+  const other = !room.persistent ? undefined : participants.find((p) => p.id !== selfId);
+
   // Entering a different room must not leak the previous room's peer; reload
-  // whatever we remember for the new space.
-  useEffect(() => {
-    setPeer(room.persistent ? getStoredPeer(room.code) : null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.id]);
-  useEffect(() => {
-    if (!room.persistent) return;
-    const other = participants.find((p) => p.id !== selfId);
-    if (other) {
-      const seen = { id: other.id, name: other.name, color: other.color, lastSeen: Date.now() };
-      storePeer(room.code, seen);
+  // whatever we remember for the new space, and adopt whoever joins it.
+  const peerKey = `${room.id}|${other?.id ?? ""}`;
+  const [prevPeerKey, setPrevPeerKey] = useState(peerKey);
+  if (peerKey !== prevPeerKey) {
+    const key = peerKey;
+    const [prevRoom, prevOther] = prevPeerKey.split("|");
+    setPrevPeerKey(key);
+    if (room.id !== prevRoom) {
+      setPeer(room.persistent ? getStoredPeer(room.code) : null);
+    } else if (other && other.id !== prevOther) {
       setPeer((prev) =>
-        prev && prev.id === seen.id
-          ? { ...prev, lastSeen: seen.lastSeen }
-          : seen,
+        prev && prev.id === other.id
+          ? prev
+          : { id: other.id, name: other.name, color: other.color, lastSeen: prev?.lastSeen ?? 0 },
       );
     }
-  }, [participants, selfId, room.persistent, room.code]);
+  }
+
+  // Remember the latest sighting so "last seen" survives the peer leaving.
+  useEffect(() => {
+    if (!room.persistent || !other) return;
+    storePeer(room.code, { id: other.id, name: other.name, color: other.color, lastSeen: Date.now() });
+  }, [room.persistent, room.code, other]);
   const otherPresent = participants.some((p) => p.id !== selfId);
 
   const copy = async (kind: "link" | "code") => {
@@ -153,7 +157,7 @@ export function ChatHeader({
                     </>
                   ) : (
                     <span className="text-ink-faint">
-                      Last seen {formatLastSeen(peer.lastSeen)}
+                      Last seen {formatLastSeen(getStoredPeer(room.code)?.lastSeen ?? peer?.lastSeen ?? 0)}
                     </span>
                   )}
                 </div>
