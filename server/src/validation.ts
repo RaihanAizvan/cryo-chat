@@ -3,8 +3,17 @@
  * Kept separate from the room/session managers for clarity.
  */
 
-import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
 import { maxMessageLength } from "./settings.js";
+
+/** True if the string contains control characters other than newline/tab:
+ * those are rejected in chat text and captions. */
+function hasDisallowedControl(raw: string): boolean {
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i);
+    if ((c <= 0x1f && c !== 0x09 && c !== 0x0a && c !== 0x0d) || c === 0x7f) return true;
+  }
+  return false;
+}
 
 /** Normalize + validate a chat message. Returns null if invalid. */
 export function normalizeMessage(raw: unknown): string | null {
@@ -13,7 +22,7 @@ export function normalizeMessage(raw: unknown): string | null {
   if (text.trim().length === 0) return null;
   if (text.length > maxMessageLength()) return null;
   // Reject control characters (but allow newline and tab).
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return null;
+  if (hasDisallowedControl(text)) return null;
   return text;
 }
 
@@ -27,7 +36,7 @@ export function normalizeCaption(raw: unknown): string {
   const text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (text.trim().length === 0) return "";
   // Reject control characters (but allow newline and tab).
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return "";
+  if (hasDisallowedControl(text)) return "";
   const cap = maxMessageLength();
   if (text.length > cap) return text.slice(0, cap);
   return text.trim();
