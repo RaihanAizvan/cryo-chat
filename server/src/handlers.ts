@@ -30,6 +30,10 @@ const DEPARTURE_GRACE_MS = 30_000;
 /** Pending departures keyed by `${roomId}::${sessionId}`, cancelled on recovery. */
 const pendingDepartures = new Map<string, NodeJS.Timeout>();
 
+/** Minimum gap between typing relays from the same participant. */
+const TYPING_COOLDOWN_MS = 1_500;
+const lastTypingAt = new Map<string, number>();
+
 function departKey(roomId: string, sessionId: string): string {
   return `${roomId}::${sessionId}`;
 }
@@ -407,12 +411,18 @@ export function attachHandlers(io: Server, socket: Socket): void {
     });
   });
 
-  // Typing indicator: relay to other room members (no server storage).
+  // Typing indicator: relay to other room members (no server storage). The
+  // relay is rate-limited per participant so a keyboard-masher can't flood the
+  // room channel (and, in shared Redis mode, the pub/sub wire) with events.
   socket.on("message:typing", (raw) => {
     const membership = activeMembership(socket);
     if (!membership) return;
     const participant = rooms.participantForSocket(membership.room, socket.id);
     if (!participant) return;
+    const now = Date.now();
+    const key = `${membership.room.id}::${participant.id}`;
+    if (now - (lastTypingAt.get(key) ?? 0) < TYPING_COOLDOWN_MS) return;
+    lastTypingAt.set(key, now);
     socket.to(membership.room.id).emit("presence:typing", {
       participantId: participant.id,
       name: participant.name,
