@@ -18,6 +18,10 @@ import { existsSync } from "node:fs";
 import { createServer, createConnection } from "node:net";
 import { fileURLToPath } from "node:url";
 import { io as createClient, type Socket } from "socket.io-client";
+import type {
+  ErrorPayload,
+  ServerToClientEventMap,
+} from "@cryo/shared";
 
 const ADMIN_KEY = "test-admin-key-2026";
 const distPath = fileURLToPath(new URL("../dist/index.mjs", import.meta.url));
@@ -147,8 +151,21 @@ function adminFor(port: number) {
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
-    const body = res.status === 204 ? null : await res.json().catch(() => ({}));
-    return { status: res.status, body };
+    return {
+      status: res.status,
+      body: (res.status === 204
+        ? null
+        : await res.json().catch(() => ({}))) as unknown,
+    };
+  };
+}
+
+/** Admin room-detail view, as rendered by the server's admin API. */
+interface AdminRoomView {
+  room: {
+    id: string;
+    code: string;
+    participants: { id: string; name: string }[];
   };
 }
 
@@ -191,20 +208,20 @@ runCluster("cross-instance moderation (shared Redis)", () => {
     const bobPid = (await bobC.init).sessionId;
 
     // Alice creates a room; bob joins it from the other instance.
-    const aliceJoined = once<any>(alice, "room:joined");
+    const aliceJoined = once<ServerToClientEventMap["room:joined"]>(alice, "room:joined");
     alice.emit("room:create", {});
     const room = (await aliceJoined).room;
 
-    const bobJoined = once<any>(bob, "room:joined");
-    const aliceSeesBob = once<any>(alice, "presence:joined");
+    const bobJoined = once<ServerToClientEventMap["room:joined"]>(bob, "room:joined");
+    const aliceSeesBob = once<ServerToClientEventMap["presence:joined"]>(alice, "presence:joined");
     bob.emit("room:join", { code: room.code });
     await bobJoined;
     const pk = await aliceSeesBob;
     expect(pk.participant.id).toBe(bobPid);
 
     // Admin kicks bob from instance A.
-    const bobKicked = once<any>(bob, "room:kicked");
-    const aliceSawLeft = once<any>(alice, "presence:left");
+    const bobKicked = once<ServerToClientEventMap["room:kicked"]>(bob, "room:kicked");
+    const aliceSawLeft = once<ServerToClientEventMap["presence:left"]>(alice, "presence:left");
     const kick = await adminA(`/rooms/${room.id}/kick`, {
       body: { participantId: bobPid, reason: "spam" },
     });
@@ -218,13 +235,14 @@ runCluster("cross-instance moderation (shared Redis)", () => {
     expect(left.participantId).toBe(bobPid);
 
     // The authoritative room snapshot no longer lists bob.
-    const detail = await adminA(`/rooms/${room.id}`);
-    expect(detail.status).toBe(200);
-    expect(detail.body.room.participants.some((p: any) => p.id === bobPid)).toBe(false);
-    expect(detail.body.room.participants).toHaveLength(1);
+    const detailRes = await adminA(`/rooms/${room.id}`);
+    expect(detailRes.status).toBe(200);
+    const detail = detailRes.body as AdminRoomView;
+    expect(detail.room.participants.some((p) => p.id === bobPid)).toBe(false);
+    expect(detail.room.participants).toHaveLength(1);
 
     // Bob can't send anymore (rejected as not_in_room)...
-    const bobErr = once<any>(bob, "error");
+    const bobErr = once<ErrorPayload>(bob, "error");
     const aliceNoSneak = expectNoEvent(alice, "message:new", "victim message leaked through");
     bob.emit("message:send", { roomId: room.id, text: "still here", clientId: "sneaky-1" });
     expect((await bobErr).code).toBe("not_in_room");
@@ -232,7 +250,7 @@ runCluster("cross-instance moderation (shared Redis)", () => {
 
     // ...and bob no longer receives room broadcasts (alice posts a message).
     const bobNoMsg = expectNoEvent(bob, "message:new", "victim received a broadcast");
-    const aliceMsg = once<any>(alice, "message:new");
+    const aliceMsg = once<ServerToClientEventMap["message:new"]>(alice, "message:new");
     alice.emit("message:send", { roomId: room.id, text: "after kick", clientId: "post-1" });
     const posted = await aliceMsg;
     expect(posted.message.text).toBe("after kick");
@@ -242,10 +260,9 @@ runCluster("cross-instance moderation (shared Redis)", () => {
     // resurrect bob anywhere either.
     alice.emit("session:name", { name: "Alice Deux" });
     await new Promise((r) => setTimeout(r, 600));
-    const after = await adminA(`/rooms/${room.id}`);
-    expect(
-      after.body.room.participants.some((p: any) => p.id === bobPid),
-    ).toBe(false);
+    const afterRes = await adminA(`/rooms/${room.id}`);
+    const after = afterRes.body as AdminRoomView;
+    expect(after.room.participants.some((p) => p.id === bobPid)).toBe(false);
 
     alice.disconnect();
     bob.disconnect();
