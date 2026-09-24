@@ -10,18 +10,10 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Typecheck + test + build
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
-    # Redis powers the cross-instance moderation integration test
-    # (server/src/cluster.e2e.test.ts) which bootstraps two servers against it.
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
 
     steps:
       - name: Checkout
@@ -41,11 +33,131 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  build:
+    name: Build client + server
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Build client + server
         run: npm run build
 
+      # The integration tests and the e2e suite run against the compiled
+      # server bundle, so share it with the jobs that need it. The e2e suite
+      # also serves the admin SPA shell from the built client (GET /admin).
+      - name: Upload server build
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-dist
+          path: server/dist
+          if-no-files-found: error
+
+      - name: Upload client build
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
+          if-no-files-found: error
+
+  test:
+    name: Unit + integration tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Redis powers the cross-instance moderation integration test
+    # (server/src/cluster.e2e.test.ts) which bootstraps two servers against it.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download server build
+        uses: actions/download-artifact@v4
+        with:
+          name: server-dist
+          path: server/dist
+
       - name: Test (unit + integration on the compiled bundle)
         run: npm test
+
+  e2e:
+    name: E2E (admin suite against compiled server)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download server build
+        uses: actions/download-artifact@v4
+        with:
+          name: server-dist
+          path: server/dist
+
+      - name: Download client build
+        uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: client/dist
 
       - name: Smoke e2e (admin suite against the compiled bundle)
         env:
