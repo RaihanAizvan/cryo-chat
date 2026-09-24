@@ -391,8 +391,8 @@ export function attachHandlers(io: Server, socket: Socket): void {
   });
 
   // Typing indicator: relay to other room members (no server storage).
-  socket.on("message:typing", (raw) => {
-    const membership = activeMembership(socket);
+  socket.on("message:typing", () => {
+    const membership = ROOM_MEMBERSHIP.get(socket);
     if (!membership) return;
     const participant = rooms.participantForSocket(membership.room, socket.id);
     if (!participant) return;

@@ -61,11 +61,15 @@ io.on("connection", (socket) => {
 
   const ip = socket.handshake.address;
 
-  socket.on("disconnect", (reason) => {
+  socket.on("disconnect", () => {
     // Release per-IP slot, then reap session memory.
     const count = ipCounter.get(ip);
     if (count && count > 0) {
-      count === 1 ? ipCounter.delete(ip) : ipCounter.set(ip, count - 1);
+      if (count === 1) {
+        ipCounter.delete(ip);
+      } else {
+        ipCounter.set(ip, count - 1);
+      }
     }
     destroy(socket);
   });

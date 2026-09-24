@@ -55,8 +55,6 @@ export function GifPicker({
   useEffect(() => {
     const q = query.trim();
     const mySeq = ++seq.current;
-    setLoading(true);
-    setError("");
     const kind = mode === "sticker" ? "stickers" : "gifs";
     const url = new URL(
       q
@@ -67,6 +65,8 @@ export function GifPicker({
 
     let cancelled = false;
     const timer = setTimeout(async () => {
+      setLoading(true);
+      setError("");
       try {
         const res = await fetch(url.toString());
         if (!res.ok) {
@@ -97,7 +97,6 @@ export function GifPicker({
       cancelled = true;
       clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, mode]);
 
   useEffect(() => {
@@ -140,6 +139,7 @@ export function GifPicker({
                   key={m}
                   type="button"
                   onClick={() => setMode(m)}
+                  aria-pressed={mode === m}
                   className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide transition-colors ${
                     mode === m
                       ? "bg-base-raised text-accent shadow-sm"
@@ -161,6 +161,7 @@ export function GifPicker({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={`Search ${mode === "sticker" ? "stickers" : "GIFs"}…`}
+                  aria-label={`Search ${mode === "sticker" ? "stickers" : "GIFs"}`}
                   className="w-full rounded-3xl border border-base-border2 bg-base py-1.5 pl-8 pr-3 text-[13px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
                 />
               </div>

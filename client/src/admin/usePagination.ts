@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 /**
  * Client-side pagination for admin list views.
@@ -19,10 +19,12 @@ export function usePagination<T>(
   setPage: (p: number) => void;
 } {
   const [page, setPage] = useState(0);
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
 
-  useEffect(() => {
+  if (prevResetKey !== resetKey) {
+    setPrevResetKey(resetKey);
     setPage(0);
-  }, [resetKey]);
+  }
 
   const pageCount = useMemo(() => Math.max(1, Math.ceil(items.length / pageSize)), [items, pageSize]);
   const safe = Math.min(page, pageCount - 1);

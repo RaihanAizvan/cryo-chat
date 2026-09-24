@@ -62,6 +62,8 @@ export function MessageComposer({
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
   const [pending, setPending] = useState<PendingMedia | null>(null);
+  // Track the object URL separately so the sheet closes before we revoke it.
+  const [pendingObj, setPendingObj] = useState<string | null>(null);
   const [rec, setRec] = useState<ActiveVoiceRecording | null>(null);
   const [recStartedAt, setRecStartedAt] = useState(0);
   const [recBusy, setRecBusy] = useState(false);
@@ -79,13 +81,21 @@ export function MessageComposer({
     if (value && onTyping) onTyping();
   };
 
-  useEffect(() => {
-    if (rec && !voiceNotesEnabled) {
-      rec.cancel();
+  // Voice notes switched off mid-recording: drop the active recording the
+  // moment the toggle flips, then release the mic once it's stashed.
+  const [prevVoiceEnabled, setPrevVoiceEnabled] = useState(voiceNotesEnabled);
+  const [staleRec, setStaleRec] = useState<ActiveVoiceRecording | null>(null);
+  if (voiceNotesEnabled !== prevVoiceEnabled) {
+    setPrevVoiceEnabled(voiceNotesEnabled);
+    if (!voiceNotesEnabled && rec) {
+      setStaleRec(rec);
       setRec(null);
       setRecStartedAt(0);
     }
-  }, [rec, voiceNotesEnabled]);
+  }
+  useEffect(() => {
+    if (staleRec) staleRec.cancel();
+  }, [staleRec]);
 
   useEffect(() => {
     if (!emojiOpen && !gifOpen && !pending && !rec) return;
@@ -163,8 +173,6 @@ export function MessageComposer({
     setGifOpen(false);
   };
 
-  /** Track the object URL separately so the sheet closes before we revoke it. */
-  const [pendingObj, setPendingObj] = useState<string | null>(null);
   useEffect(() => {
     return () => {
       if (pendingObj) URL.revokeObjectURL(pendingObj);
@@ -465,6 +473,7 @@ export function MessageComposer({
           onPaste={handlePaste}
           maxLength={MAX_MESSAGE_LENGTH}
           placeholder="Message…"
+          aria-label="Message"
           enterKeyHint={isCoarse ? "enter" : "send"}
           autoCapitalize="sentences"
           autoCorrect="on"

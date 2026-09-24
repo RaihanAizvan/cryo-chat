@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { AdminSettings } from "@cryo/shared";
 import { adminApi } from "../adminApi";
 import { Badge, Card, CardHeader, EmptyState, ErrorBanner, Spinner } from "../components";
@@ -47,15 +47,13 @@ export function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const wasData = useRef(false);
 
-  useEffect(() => {
-    if (s.data && !wasData.current) {
-      wasData.current = true;
-      setForm({ ...s.data });
-    }
-    if (s.data) setForm((prev) => prev ?? { ...s.data });
-  }, [s.data]);
+  // Initialize the editable form from the first settings snapshot that comes
+  // back. Guarded so it only runs once — user edits are never overwritten by
+  // later polls.
+  if (s.data && form === null) {
+    setForm(s.data);
+  }
 
   if (s.loading && !s.data) return <Spinner />;
   if (s.error) return <ErrorBanner message={`Settings: ${s.error}`} onRetry={s.reload} />;

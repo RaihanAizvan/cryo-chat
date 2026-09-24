@@ -18,7 +18,7 @@ interface Props {
  * a trash control to discard, and a stop button that sends the note.
  */
 export function VoiceRecorder({ startedAt, onSend, onCancel, busy }: Props) {
-  const [elapsed, setElapsed] = useState(Math.floor((Date.now() - startedAt) / 1000));
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     const t = setInterval(

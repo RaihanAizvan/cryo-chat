@@ -347,13 +347,17 @@ export function mediaStats(): { inMemoryFiles: number; inMemoryBytes: number; re
 
 function sanitizeName(name: unknown): string | undefined {
   if (typeof name !== "string") return undefined;
-  const cleaned = name
-    .split(/[\\/]/)
-    .pop()
-    ?.replace(/[\u0000-\u001f\u007f]/g, "")
-    .trim();
-  if (!cleaned) return undefined;
-  return cleaned.slice(0, 80);
+  const base = name.split(/[\\/]/).pop() ?? "";
+  // Drop C0 control chars and DEL (same set the old regex stripped).
+  let cleaned = "";
+  for (let i = 0; i < base.length; i++) {
+    const c = base.charCodeAt(i);
+    if (c <= 0x1f || c === 0x7f) continue;
+    cleaned += base[i];
+  }
+  const trimmed = cleaned.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, 80);
 }
 
 /**

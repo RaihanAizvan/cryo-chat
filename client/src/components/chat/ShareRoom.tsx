@@ -2,22 +2,12 @@ import { useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
 import { Avatar } from "../ui/Avatar";
 import { IconCopy, IconCheck, IconLink } from "../ui/Icon";
+import { roomShareLink } from "../../lib/shareLink";
 
 interface Props {
   room: PublicRoom;
   participants: Participant[];
   selfId: string | null;
-}
-
-export function roomShareLink(room: {
-  id: string;
-  code: string;
-  persistent: boolean;
-}): string {
-  const base = window.location.origin;
-  // The special room is best shared by its stable code URL (/9999), which
-  // keeps working even after the room has been closed and recreated.
-  return room.persistent ? `${base}/${room.code}` : `${base}/r/${room.id}`;
 }
 
 export function ShareRoom({ room, participants, selfId }: Props) {

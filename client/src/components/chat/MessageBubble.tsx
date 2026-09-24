@@ -192,7 +192,7 @@ function useSwipeToReply(enabled: boolean, onArmed: (() => void) | undefined) {
   return {
     rowStyle,
     swiping,
-    armed: swiping && dxRef.current >= SWIPE_ARM_PX,
+    armed: swiping && dragX >= SWIPE_ARM_PX,
     onPointerDown,
     onPointerMove,
     onPointerUp: finish,
@@ -268,7 +268,7 @@ export function MessageBubble({
           type="button"
           onClick={() => onReply?.(message)}
           aria-label="Reply"
-          className="absolute right-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-base-border2 bg-base-raised p-1.5 text-ink-muted opacity-0 shadow-md transition-opacity hover:text-accent group-hover:opacity-100"
+          className="absolute right-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center rounded-full border border-base-border2 bg-base-raised p-1.5 text-ink-muted shadow-md transition-opacity hover:text-accent group-hover:opacity-100 focus-visible:opacity-100"
         >
           <IconReply width={14} height={14} />
         </button>

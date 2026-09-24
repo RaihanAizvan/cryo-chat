@@ -20,6 +20,7 @@ export function EmojiPicker({ onPick }: Props) {
             key={c.id}
             onClick={() => setCatId(c.id)}
             aria-label={c.label}
+            aria-pressed={active.id === c.id}
             title={c.label}
             className={`flex h-9 shrink-0 items-center justify-center rounded-lg px-1.5 text-[20px] transition-colors ${
               active.id === c.id

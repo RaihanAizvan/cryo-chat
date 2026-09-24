@@ -73,8 +73,8 @@ export interface ServerToClientEventMap {
   "message:new": { message: PublicMessage };
   /** Ordered historical messages delivered on join (ephemeral, in-memory). */
   "message:history": { messages: PublicMessage[] };
-  /** All messages in the room have been cleared. */
-  "message:cleared": {};
+  /** All messages in the room have been cleared (no payload; marker object emitted). */
+  "message:cleared": object;
   /** Room expired while the client was inside it. */
   "room:expired": { roomId: string };
   /** Room was closed (manually) while the client was inside it. */
