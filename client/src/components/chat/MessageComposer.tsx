@@ -6,12 +6,14 @@ import { IconEmoji, IconImage, IconMic, IconReply, IconSend, IconSticker, IconX 
 import { EmojiPicker } from "./EmojiPicker";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
+import { MEDIA_TRAY_HEIGHT } from "../../lib/mediaTray";
 import { VoiceRecorder } from "./VoiceRecorder";
 import {
   uploadMedia,
   getCloudinaryPreset,
   uploadToCloudinary,
   registerRemoteMedia,
+  preloadStickers,
   type UploadResult,
 } from "../../lib/api";
 import { prepareUpload } from "../../lib/image";
@@ -75,6 +77,18 @@ export function MessageComposer({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const gifInputRef = useRef<HTMLInputElement>(null);
   const stickerInputRef = useRef<HTMLInputElement>(null);
+
+  // Warm the sticker pack cache as soon as the composer mounts so the tray
+  // opens without a loading flash.
+  useEffect(() => {
+    void preloadStickers();
+  }, []);
+
+  // While the media tray is open the bar sits above it (WhatsApp-style: the
+  // tray fills the space the keyboard would occupy). The keyboard inset still
+  // applies on top so focusing the tray's search box raises everything above
+  // the keyboard instead of covering it.
+  const trayOffset = gifOpen ? MEDIA_TRAY_HEIGHT : 0;
 
   const onChange = (value: string) => {
     setText(value);
@@ -412,7 +426,7 @@ export function MessageComposer({
       ref={barRef}
       className="fixed z-20 border-t border-base-border bg-base/95 backdrop-blur"
       style={{
-        bottom: `calc(${inset}px + env(safe-area-inset-bottom))`,
+        bottom: `calc(${inset + trayOffset}px + env(safe-area-inset-bottom))`,
         left: "env(safe-area-inset-left)",
         right: "env(safe-area-inset-right)",
       }}
@@ -502,7 +516,17 @@ export function MessageComposer({
         <button
           onClick={() => {
             setEmojiOpen(false);
-            setGifOpen((v) => !v);
+            setGifOpen((v) => {
+              if (!v) {
+                // WhatsApp-style: the tray slides in where the keyboard was, so
+                // drop the keyboard on open. Also re-pull the pack in the
+                // background so re-openings reflect new uploads instantly.
+                const el = document.activeElement;
+                if (el instanceof HTMLElement) el.blur();
+                void preloadStickers(true);
+              }
+              return !v;
+            });
           }}
           aria-label={gifOpen ? "Close sticker picker" : "Open sticker picker"}
           className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
