@@ -400,7 +400,7 @@ export function MessageBubble({
             )}
           </>
         ) : (
-          <div className={`cryo-in flex items-end gap-1.5 ${emojiOnly ? "flex-col items-start" : ""}`}>
+          <div className={`cryo-in flex min-w-0 max-w-full items-end gap-1.5 ${emojiOnly ? "flex-col items-start" : ""}`}>
             {emojiOnly ? (
               <>
                 {quote && <div className="mb-0.5 w-max max-w-full">{quote}</div>}
@@ -419,7 +419,7 @@ export function MessageBubble({
               </>
             ) : (
               <div
-                className={`rounded-bubble px-3.5 py-2 pb-1.5 text-[15px] leading-relaxed ${
+                className={`min-w-0 rounded-bubble px-3.5 py-2 pb-1.5 text-[15px] leading-relaxed ${
                   mine
                     ? "rounded-br-md bg-accent text-white"
                     : "rounded-bl-md border border-base-border bg-base-raised text-ink"
