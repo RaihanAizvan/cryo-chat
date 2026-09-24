@@ -12,7 +12,6 @@ import {
   getRemoteFor,
   consumeRemoteViewOnce,
   MAX_MEDIA_BYTES,
-  MIN_MEDIA_BYTES,
 } from "./media";
 import { updateSettings } from "./settings";
 

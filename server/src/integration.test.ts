@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { io as createClient, type Socket } from "socket.io-client";
+import type { ErrorPayload, ServerToClientEventMap } from "@cryo/shared";
 
 const ADMIN_KEY = "test-admin-key-2026";
 const distPath = fileURLToPath(new URL("../dist/index.mjs", import.meta.url));
@@ -76,7 +77,7 @@ function once<A>(s: Socket, event: string): Promise<A> {
  * sometimes in the same tick as "connect" — so listeners must be registered
  * at creation time or we can miss event delivery.
  */
-function makeClient<A>(port: number) {
+function makeClient(port: number) {
   const s = createClient(`http://127.0.0.1:${port}`, {
     path: "/socket.io",
     transports: ["websocket"],
@@ -86,12 +87,21 @@ function makeClient<A>(port: number) {
     s.once("connect", () => resolve(s));
     s.once("connect_error", reject);
   });
-  const init = once<A>(s, "session:init");
+  const init = once<ServerToClientEventMap["session:init"]>(s, "session:init");
   return { socket: s, connected, init };
 }
 
+interface AdminSettingsView {
+  voiceNotesEnabled?: boolean;
+  maxRoomSize?: number;
+  reservedRoomCode?: string;
+}
+type AdminBody = Record<string, unknown> & { settings?: AdminSettingsView };
 let handle: ServerHandle;
-let admin: (path: string, opts?: { method?: string; body?: unknown; key?: string }) => Promise<{ status: number; body: any }>;
+let admin: (
+  path: string,
+  opts?: { method?: string; body?: unknown; key?: string },
+) => Promise<{ status: number; body: AdminBody }>;
 
 beforeAll(async () => {
   handle = await bootServer();
@@ -115,26 +125,26 @@ afterAll(async () => {
 
 runIntegration("socket protocol on the production bundle", () => {
   it("runs a full session → create → join → message → presence lifecycle", async () => {
-    const aliceC = makeClient<{ sessionId: string; name: string; voiceNotesEnabled: boolean }>(handle.port);
-    const bobC = makeClient<{ sessionId: string }>(handle.port);
+    const aliceC = makeClient(handle.port);
+    const bobC = makeClient(handle.port);
     const alice = await aliceC.connected;
     const bob = await bobC.connected;
     const aliceInit = await aliceC.init;
-    const bobInit = await bobC.init;
+    await bobC.init;
     expect(aliceInit.sessionId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(aliceInit.name.length).toBeGreaterThan(0);
     expect(aliceInit.voiceNotesEnabled).toBe(true);
 
     // Alice creates a room.
-    const aliceRoom = once<any>(alice, "room:joined");
+    const aliceRoom = once<ServerToClientEventMap["room:joined"]>(alice, "room:joined");
     alice.emit("room:create", {});
     const room = (await aliceRoom).room;
     expect(room.code).toMatch(/^\d{4}$/);
     expect(room.isHost).toBe(true);
 
     // Bob joins via code; alice sees presence.
-    const aliceSeesBob = once<any>(alice, "presence:joined");
-    const bobRoom = once<any>(bob, "room:joined");
+    const aliceSeesBob = once<ServerToClientEventMap["presence:joined"]>(alice, "presence:joined");
+    const bobRoom = once<ServerToClientEventMap["room:joined"]>(bob, "room:joined");
     bob.emit("room:join", { code: room.code });
     const joinedTeam = await bobRoom;
     expect(joinedTeam.room.id).toBe(room.id);
@@ -142,23 +152,23 @@ runIntegration("socket protocol on the production bundle", () => {
     expect(pk.participant.name.length).toBeGreaterThan(0);
 
     // Alice sends a message, bob receives it.
-    const bobMsg = once<any>(bob, "message:new");
+    const bobMsg = once<ServerToClientEventMap["message:new"]>(bob, "message:new");
     alice.emit("message:send", { roomId: room.id, text: "hi from test", clientId: "t-1" });
     const recv = await bobMsg;
     expect(recv.message.text).toBe("hi from test");
     expect(recv.message.clientId).toBe("t-1");
 
     // History replays after a (re)join.
-    const bobLeft = once<any>(bob, "room:left");
+    const bobLeft = once<ServerToClientEventMap["room:left"]>(bob, "room:left");
     bob.emit("room:leave", { roomId: room.id });
     await bobLeft;
-    const bobHistory = once<any>(bob, "message:history");
+    const bobHistory = once<ServerToClientEventMap["message:history"]>(bob, "message:history");
     bob.emit("room:join", { roomId: room.id });
     const hist = await bobHistory;
-    expect(hist.messages.some((m: any) => m.text === "hi from test")).toBe(true);
+    expect(hist.messages.some((m) => m.text === "hi from test")).toBe(true);
 
     // Invalid message is rejected with an error event.
-    const errP = once<any>(bob, "error");
+    const errP = once<ErrorPayload>(bob, "error");
     bob.emit("message:send", { roomId: room.id, text: "   " });
     const err = await errP;
     expect(err.code).toBeTruthy();
@@ -169,22 +179,22 @@ runIntegration("socket protocol on the production bundle", () => {
   it("applies voiceNotesEnabled flag from admin settings to new sessions", async () => {
     const s0 = await admin("/settings");
     expect(s0.status).toBe(200);
-    expect(s0.body.settings.voiceNotesEnabled).toBe(true);
+    expect(s0.body.settings!.voiceNotesEnabled).toBe(true);
 
     const off = await admin("/settings", {
       method: "PUT",
       body: { voiceNotesEnabled: false },
     });
     expect(off.status).toBe(200);
-    expect(off.body.settings.voiceNotesEnabled).toBe(false);
+    expect(off.body.settings!.voiceNotesEnabled).toBe(false);
 
-    const clientC = makeClient<{ voiceNotesEnabled: boolean }>(handle.port);
+    const clientC = makeClient(handle.port);
     const client = await clientC.connected;
     try {
       const init = await clientC.init;
       expect(init.voiceNotesEnabled).toBe(false);
       // Live toggle goes out as a settings:update event to connected clients.
-      const updateP = once<any>(client, "settings:update");
+      const updateP = once<ServerToClientEventMap["settings:update"]>(client, "settings:update");
       await admin("/settings", { method: "PUT", body: { voiceNotesEnabled: true } });
       const upd = await updateP;
       expect(upd.voiceNotesEnabled).toBe(true);
@@ -230,6 +240,6 @@ runIntegration("admin REST API on the production bundle", () => {
   it("clamps nonsensical numeric settings instead of erroring", async () => {
     const ok = await admin("/settings", { method: "PUT", body: { maxRoomSize: 99999 } });
     expect(ok.status).toBe(200);
-    expect(ok.body.settings.maxRoomSize).toBe(200);
+    expect(ok.body.settings!.maxRoomSize).toBe(200);
   });
 });

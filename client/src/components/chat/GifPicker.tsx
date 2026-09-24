@@ -55,8 +55,6 @@ export function GifPicker({
   useEffect(() => {
     const q = query.trim();
     const mySeq = ++seq.current;
-    setLoading(true);
-    setError("");
     const kind = mode === "sticker" ? "stickers" : "gifs";
     const url = new URL(
       q
@@ -67,6 +65,8 @@ export function GifPicker({
 
     let cancelled = false;
     const timer = setTimeout(async () => {
+      setLoading(true);
+      setError("");
       try {
         const res = await fetch(url.toString());
         if (!res.ok) {
@@ -97,7 +97,6 @@ export function GifPicker({
       cancelled = true;
       clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, mode]);
 
   useEffect(() => {

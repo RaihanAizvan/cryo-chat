@@ -12,12 +12,10 @@ export function usePoll<T>(fetcher: () => Promise<T>, intervalMs: number): {
 } {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     fetcher()
       .then((d) => {
         if (cancelled) return;
@@ -27,9 +25,6 @@ export function usePoll<T>(fetcher: () => Promise<T>, intervalMs: number): {
       .catch((e: unknown) => {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Request failed");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -42,6 +37,7 @@ export function usePoll<T>(fetcher: () => Promise<T>, intervalMs: number): {
     return () => window.clearInterval(id);
   }, [intervalMs]);
 
+  const loading = data === null && error === null;
   const reload = () => setTick((t) => t + 1);
   return { data, error, loading, reload };
 }

@@ -34,6 +34,7 @@ function AdminRoute() {
 
 function ChatApp() {
   const [state, actions] = useChatRoom();
+  const { joinRoom } = actions;
   const autoJoined = useRef(false);
 
   // Auto-join room when arriving via a shared link or the special code URL.
@@ -44,13 +45,13 @@ function ChatApp() {
       autoJoined.current = true;
       // Give the socket a moment to handshake before joining.
       const t = window.setTimeout(
-        () => actions.joinRoom("roomId" in target ? target.roomId : target.code),
+        () => joinRoom("roomId" in target ? target.roomId : target.code),
         120,
       );
       return () => window.clearTimeout(t);
     }
     autoJoined.current = true;
-  }, [actions.joinRoom]);
+  }, [joinRoom]);
 
   return (
     <div className="mx-auto flex h-full flex-col overflow-y-auto md:max-w-3xl">

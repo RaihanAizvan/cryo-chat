@@ -5,7 +5,6 @@
 import { randomBytes, randomInt } from "node:crypto";
 import { ROOM_CODE_SIZE, ROOM_ID_SIZE, MAX_NAME_LENGTH, hash } from "@cryo/shared";
 
-const CODE_ALPHABET = "0123456789";
 const ID_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -50,13 +49,24 @@ export function randomDisplayName(): string {
   return `${a} ${n}`;
 }
 
+/** True if the string contains control characters that shouldn't appear in a
+ * display name: C0 controls except tab/newline/carriage-return (DEL allowed
+ * to keep existing name validation permissive). */
+function hasDisallowedControl(raw: string): boolean {
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i);
+    if (c <= 0x1f && c !== 0x09 && c !== 0x0a && c !== 0x0d) return true;
+  }
+  return false;
+}
+
 /** Normalize + validate a display name. Returns null if invalid. */
 export function normalizeName(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim().replace(/\s+/g, " ").slice(0, MAX_NAME_LENGTH);
   if (trimmed.length === 0) return null;
   // Reject control chars and line breaks.
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(trimmed)) return null;
+  if (hasDisallowedControl(trimmed)) return null;
   return trimmed;
 }
 

@@ -192,7 +192,7 @@ function useSwipeToReply(enabled: boolean, onArmed: (() => void) | undefined) {
   return {
     rowStyle,
     swiping,
-    armed: swiping && dxRef.current >= SWIPE_ARM_PX,
+    armed: swiping && dragX >= SWIPE_ARM_PX,
     onPointerDown,
     onPointerMove,
     onPointerUp: finish,
