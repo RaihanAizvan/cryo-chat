@@ -68,6 +68,10 @@ and RAM stays flat.
 
 - **Add a sticker:** upload a PNG/WebP/GIF to the folder in the Cloudinary
   dashboard (square images look best; the client renders stickers at 96×96).
+- **API key permission:** the pack lists the folder through the Search API
+  (`asset_folder`), which works on modern "dynamic folder" accounts. The key
+  needs read/Admin permission — a Media-Library-User key matches the folder but
+  the API intentionally returns no asset records, so the pack stays empty.
 - **Picker:** the "Pack" tab lists them first, ahead of the optional Giphy
   tabs. Picking one sends it instantly by reference (no upload, no TTL).
 - **Disabled automatically** when the Cloudinary creds are unset — the tab
