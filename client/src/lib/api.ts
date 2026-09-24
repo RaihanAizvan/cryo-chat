@@ -101,6 +101,41 @@ export async function fetchStickers(): Promise<PackSticker[] | null> {
   }
 }
 
+// Module-level cache so the sticker tray opens instantly (no re-fetch each
+// open). `undefined` = not fetched yet; a background refresh on open keeps it
+// fresh for the next open.
+let stickersCache: PackSticker[] | null | undefined;
+let stickersInFlight: Promise<PackSticker[] | null> | null = null;
+
+/**
+ * Sticker-pack fetch that memoizes its result: after the first call the value
+ * is served synchronously (through a resolved promise), so re-opening the
+ * picker never shows a loading state. Pass `forceRefresh` to re-pull from the
+ * server (the pack is small; used on open to pick up new uploads between
+ * sessions without blocking the UI).
+ */
+export function preloadStickers(forceRefresh = false): Promise<PackSticker[] | null> {
+  if (!forceRefresh && stickersCache !== undefined) {
+    return Promise.resolve(stickersCache);
+  }
+  if (stickersInFlight) return stickersInFlight;
+  stickersInFlight = fetchStickers().then((list) => {
+    stickersCache = list;
+    stickersInFlight = null;
+    return list;
+  });
+  return stickersInFlight;
+}
+
+/**
+ * Synchronous view of the cached pack for first-paint rendering: undefined
+ * when never fetched (tray shows skeletons), null when the pack is disabled,
+ * otherwise the cached list (tray opens with content, zero flash).
+ */
+export function peekStickers(): PackSticker[] | null | undefined {
+  return stickersCache;
+}
+
 /** URL that serves the media bytes back for a given viewer session. */
 export function mediaUrl(mediaId: string, sessionId: string): string {
   const q = new URLSearchParams({ session: sessionId });
