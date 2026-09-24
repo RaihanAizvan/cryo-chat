@@ -48,6 +48,7 @@ export function JoinRoom({ error, onErrorClear, onClose, onJoin }: Props) {
         autoCorrect="off"
         spellCheck={false}
         maxLength={4}
+        aria-label="Room code"
         aria-invalid={!!error}
         className="w-full rounded-2xl border border-base-border2 bg-base-sunken px-4 py-3.5 text-[15px] text-ink tracking-[0.3em] placeholder:tracking-normal placeholder:text-ink-faint focus:border-accent focus:outline-none"
       />
