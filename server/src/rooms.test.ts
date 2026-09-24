@@ -9,6 +9,8 @@ import {
   addParticipant,
   participantForSocket,
   removeParticipant,
+  removeParticipantById,
+  removeParticipantLocalOnly,
   renameParticipant,
   renameParticipantById,
   addMessage,
@@ -192,6 +194,44 @@ describe("renameParticipant / renameParticipantById", () => {
     const room = setupRoom();
     expect(renameParticipant(room, "ghost", "x", 1)).toBeUndefined();
     expect(renameParticipantById(room, "missing", "x")).toBeUndefined();
+  });
+});
+
+describe("removeParticipantById / removeParticipantLocalOnly", () => {
+  it("removes a participant by id and clears their socket mappings", () => {
+    const room = setupRoom();
+    addParticipant(room, fakeSocket("s2"), "p2", "Second", 0);
+    const removed = removeParticipantById(room, "p2");
+    expect(removed?.id).toBe("p2");
+    expect(room.participants.has("p2")).toBe(false);
+    expect(participantForSocket(room, "s2")).toBeUndefined();
+    expect(room.hostParticipantId).toBe("host-id");
+  });
+
+  it("reassigns the host when the removed participant was the host", () => {
+    const room = setupRoom();
+    addParticipant(room, fakeSocket("s2"), "p2", "Second", 0);
+    removeParticipantById(room, "host-id");
+    expect(room.hostParticipantId).toBe("p2");
+  });
+
+  it("is a no-op and leaves the room alone for unknown ids", () => {
+    const room = setupRoom();
+    expect(removeParticipantById(room, "ghost")).toBeUndefined();
+    expect(room.participants.size).toBe(1);
+    expect(room.sockets.size).toBe(1);
+  });
+
+  it("removeParticipantLocalOnly drops state without persisting (idempotent)", () => {
+    const room = setupRoom();
+    addParticipant(room, fakeSocket("s2"), "p2", "Second", 0);
+    const removed = removeParticipantLocalOnly(room, "p2");
+    expect(removed?.id).toBe("p2");
+    expect(participantForSocket(room, "s2")).toBeUndefined();
+    expect(room.participants.has("p2")).toBe(false);
+    // A second call (e.g. a late kick event echo) is a safe no-op.
+    expect(removeParticipantLocalOnly(room, "p2")).toBeUndefined();
+    expect(room.participants.size).toBe(1);
   });
 });
 
