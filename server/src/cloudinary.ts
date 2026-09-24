@@ -130,27 +130,32 @@ export function remoteSecureUrl(publicId: string): string {
 }
 
 /**
- * List image assets under a folder (Admin API). Returns metadata only — bytes
+ * List image assets in a folder (Search API). Returns metadata only — bytes
  * stay on the CDN and are streamed on demand. Paginates until `maxResults` is
  * reached. Used once at boot and on the refresh interval to seed/prune the
  * in-memory sticker pack.
+ *
+ * This targets `asset_folder` (Search) rather than the classic `prefix`
+ * listing: modern accounts use dynamic folders, where the folder is a metadata
+ * field on a flat public_id and the prefix-based `resources` endpoint returns
+ * nothing. `asset_folder` matching works in both modes. Requires read/Admin
+ * permission on the API key — an ML-user-only key matches the folder in search
+ * but returns no asset bodies.
  */
 export async function listPackResources(
   folder: string,
   maxResults: number,
 ): Promise<{ publicId: string; format: string; width: number; height: number }[]> {
+  if (folder?.includes('"') || folder?.includes("\\")) return [];
   ensureConfigured();
   const rows: { publicId: string; format: string; width: number; height: number }[] = [];
   let nextCursor: string | null = null;
   do {
-    const opts: Record<string, unknown> = {
-      type: "upload",
-      resource_type: "image",
-      prefix: `${folder}/`,
-      max_results: Math.min(maxResults, 500),
-    };
-    if (nextCursor) opts.next_cursor = nextCursor;
-    const res = (await cloudinary.api.resources(opts)) as {
+    const query = cloudinary.search
+      .expression(`asset_folder:"${folder}"`)
+      .max_results(Math.min(maxResults, 500));
+    if (nextCursor) query.next_cursor(nextCursor);
+    const res = (await query.execute()) as {
       resources?: Array<{
         public_id?: unknown;
         format?: unknown;
