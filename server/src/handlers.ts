@@ -20,6 +20,7 @@ import { normalizeCode } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
 import { isBanned } from "./bans.js";
 import { store } from "./store.js";
+import type { RoomEventEnvelope } from "./store.js";
 
 /** Internal participant nonce bound to a socket within a room. */
 const ROOM_MEMBERSHIP = new WeakMap<Socket, { room: rooms.Room; pid: string }>();
@@ -587,10 +588,11 @@ function leaveRoom(io: Server, socket: Socket, room: rooms.Room): void {
 
 /**
  * Remove a member by participant id (admin moderation). Unlike a normal leave,
- * the affected socket gets an explicit `room:kicked` notice first. Works both
- * for local sockets and for members seated on another instance (located via
- * fetchSockets + the participant id stamped on socket.data), and even during
- * the disconnect-grace window. Returns the removed participant, or null.
+ * the affected socket(s) get an explicit `room:kicked` notice first. Works for
+ * local sockets and for members seated on another instance: a `kick` room event
+ * tells every instance to evict the sockets it seats, so the victim's internal
+ * membership is torn down wherever it actually lives. Also works during the
+ * disconnect-grace window. Returns the removed participant, or null.
  */
 export async function adminRemoveMember(
   io: Server,
@@ -600,33 +602,22 @@ export async function adminRemoveMember(
 ): Promise<Participant | null> {
   const participant = room.participants.get(participantId);
   if (!participant) return null;
-  const notice = {
+  const notice = kickNotice(room.id, reason);
+  // Announce the kick BEFORE the authoritative removal snapshot below:
+  // pub/sub is FIFO on one connection, so every instance evicts the victim's
+  // sockets first and a later snapshot cannot resurrect them from a stale
+  // local view.
+  await store.publishRoom({
+    kind: "kick",
     roomId: room.id,
-    reason: reason ?? "You were removed from the room by an admin.",
-  };
-  // A local socket for this member, if this instance seats them.
-  let localSocket: Socket | undefined;
-  for (const [sid, pid] of room.sockets) {
-    if (pid === participantId) {
-      localSocket = io.sockets.sockets.get(sid);
-      break;
-    }
-  }
-  if (!localSocket) {
-    // Remote member: find their socket cluster-wide and notify it directly.
-    const remote = (await io.in(room.id).fetchSockets()).find(
-      (s) => s.data?.pid === participantId,
-    );
-    if (remote) io.to(remote.id).emit("room:kicked", notice);
-  }
-  cancelDeparture(room.id, participantId);
+    participantId,
+    reason,
+  });
+  // This instance evicts whoever it seats directly (its own kick echo is
+  // ignored by the store listener), then removes the member from the shared
+  // store so the removal is persisted cluster-wide.
+  evictParticipant(io, room, participantId, notice);
   rooms.removeParticipantById(room, participantId);
-  if (localSocket) {
-    ROOM_MEMBERSHIP.delete(localSocket);
-    localSocket.leave(room.id);
-    localSocket.data.pid = undefined;
-    localSocket.emit("room:kicked", notice);
-  }
   const system = rooms.addSystemMessage(room, `${participant.name} was removed`);
   io.to(room.id).emit("message:new", { message: system });
   io.to(room.id).emit("presence:left", { participantId: participant.id });
@@ -640,6 +631,68 @@ export async function adminRemoveMember(
     detail: reason,
   });
   return participant;
+}
+
+/** The payload every kicked client receives. */
+function kickNotice(
+  roomId: string,
+  reason?: string,
+): { roomId: string; reason: string } {
+  return {
+    roomId,
+    reason: reason ?? "You were removed from the room by an admin.",
+  };
+}
+
+/**
+ * Evict every socket this instance seats for `participantId` in `room`, and
+ * drop the member's local room state (without writing to the store, so a
+ * non-authoritative instance can never persist a stale copy of them).
+ */
+function evictParticipant(
+  io: Server,
+  room: rooms.Room,
+  participantId: string,
+  notice: { roomId: string; reason: string },
+): void {
+  // No resume: remove the shared session -> room index so a reconnect cannot
+  // be re-seated after the kick.
+  void store.removeSessionRoom(participantId, room.id);
+  cancelDeparture(room.id, participantId);
+  const held: string[] = [];
+  for (const [sid, pid] of room.sockets) {
+    if (pid === participantId) held.push(sid);
+  }
+  // Tear down the internal membership FIRST so a kicked client cannot race a
+  // message through the gap between the notice and the cleanup.
+  for (const sid of held) {
+    room.sockets.delete(sid);
+    const s = io.sockets.sockets.get(sid);
+    if (!s) continue;
+    ROOM_MEMBERSHIP.delete(s);
+    s.leave(room.id);
+    if (s.data?.pid === participantId) s.data.pid = undefined;
+  }
+  // Always drop the local participant entry: a later snapshot or in-flight
+  // persist on this instance must not resurrect the kicked member.
+  rooms.removeParticipantLocalOnly(room, participantId);
+  for (const sid of held) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) s.emit("room:kicked", notice);
+  }
+}
+
+/**
+ * Route cluster-wide moderation events to the socket layer. `io` is only known
+ * once the server boots, so index.ts wires this up before listening starts.
+ */
+export function attachClusterModeration(io: Server): void {
+  store.on("room", (e: RoomEventEnvelope) => {
+    if (e.origin === config.instanceId || e.kind !== "kick") return;
+    const room = rooms.getRoom(e.roomId);
+    if (!room) return;
+    evictParticipant(io, room, e.participantId, kickNotice(e.roomId, e.reason));
+  });
 }
 
 /** Close a room: kick everyone, announce it, and destroy it. */

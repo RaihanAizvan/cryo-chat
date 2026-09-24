@@ -9,7 +9,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { config, redisConfigured } from "./config.js";
 import { createHttpApp, attachClientStatic } from "./http.js";
 import { socketIoCors } from "./cors.js";
-import { attachHandlers, startSweeper } from "./handlers.js";
+import { attachHandlers, attachClusterModeration, startSweeper } from "./handlers.js";
 import { destroy, loadFromStore as loadSessions } from "./sessions.js";
 import { loadFromStore as loadBans } from "./bans.js";
 import { getSettings, loadFromStore as loadSettings } from "./settings.js";
@@ -72,6 +72,8 @@ io.on("connection", (socket) => {
 });
 
 startSweeper(io);
+// Route cluster-wide moderation events (admin kicks) to the socket layer.
+attachClusterModeration(io);
 
 /** Boot: connect the shared store, seed caches from it, then listen. */
 async function main(): Promise<void> {
