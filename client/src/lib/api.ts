@@ -73,6 +73,34 @@ export async function uploadMedia(
   return (await res.json()) as UploadResult;
 }
 
+/** One sticker from the project's Cloudinary pack (metadata only). */
+export interface PackSticker {
+  /** Pack mediaId (the Cloudinary public_id). Send a message referencing it. */
+  id: string;
+  /** Public CDN url of the sticker bytes. */
+  url: string;
+  width?: number;
+  height?: number;
+  /** Human label for aria/tooltips (file base name). */
+  name?: string;
+}
+
+/**
+ * Fetch the sticker pack list. Returns null when the pack is unavailable
+ * (Cloudinary not configured, or a network failure) so the caller can hide the
+ * tab; an empty array means a configured pack that has no stickers yet.
+ */
+export async function fetchStickers(): Promise<PackSticker[] | null> {
+  try {
+    const res = await fetch(`${fetchBase}/api/stickers`);
+    if (!res.ok) return null;
+    const d = (await res.json()) as { stickers?: PackSticker[] };
+    return d.stickers ?? [];
+  } catch {
+    return null;
+  }
+}
+
 /** URL that serves the media bytes back for a given viewer session. */
 export function mediaUrl(mediaId: string, sessionId: string): string {
   const q = new URLSearchParams({ session: sessionId });

@@ -318,6 +318,16 @@ export function MessageComposer({
     }
   };
 
+  /**
+   * Send a pack sticker instantly by reference: the pack ships with the server
+   * build, so there's nothing to upload — the server resolves the mediaId and
+   * every participant streams it from the CDN.
+   */
+  const sendPackSticker = (mediaId: string) => {
+    setGifOpen(false);
+    onSend("", { type: "sticker", mediaId });
+  };
+
   const clearPending = () => {
     setPending(null);
     setPendingObj((u) => {
@@ -579,7 +589,8 @@ export function MessageComposer({
 
       {!pending && gifOpen && (
         <GifPicker
-          initialMode="sticker"
+          initialMode="pack"
+          onPickPackSticker={sendPackSticker}
           onPickGif={(f) => beginPending(f)}
           onPickSticker={(f) => void sendSticker(f)}
           onPickStickerFromImage={() => {
