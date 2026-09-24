@@ -462,6 +462,9 @@ function capMessages(room: Room): void {
  * Copy remote metadata/participants/messages onto a cached room. Participants
  * this instance still holds live sockets for are kept even if the snapshot no
  * longer lists them (the local socket is the source of truth for its member).
+ * A kicked member cannot come back this way: the kick flow removes their
+ * socket mappings from `room.sockets` first, so the keeping-loop has nothing
+ * to restore and the authoritative removal snapshot stays authoritative.
  */
 function applySnapshot(room: Room, snap: RoomSnapshot): void {
   room.code = snap.code;
@@ -517,6 +520,14 @@ function applyRemoteRoom(event: RoomEventEnvelope): void {
     case "rename": {
       const p = rooms.get(event.roomId)?.participants.get(event.participantId);
       if (p) p.name = event.name;
+      return;
+    }
+    case "kick": {
+      // Socket/state eviction for a kicked member is handled by the socket
+      // layer (handlers.ts) on whichever instance seats them. Nothing else is
+      // needed here: the kick publish precedes the removal snapshot, so by the
+      // time applySnapshot runs the member's socket mappings are gone and the
+      // resurrection loop below has nothing to restore.
       return;
     }
     case "delete": {
@@ -602,17 +613,31 @@ export async function getOrCreateReservedRoomClaimed(): Promise<Room | undefined
   return loadRoomByCodeFromStore(settings.reservedRoomCode);
 }
 
-/** Remove a participant by id (admin moderation, including remote members). */
-export function removeParticipantById(room: Room, participantId: string): Participant | undefined {
+/** Remove a participant from the local room state (maps + host reassignment)
+ * WITHOUT writing to the shared store. The moderating instance persists the
+ * authoritative removal; every other instance uses this so a stale snapshot or
+ * an in-flight persist can never resurrect/duplicate a kicked member. */
+export function removeParticipantLocalOnly(
+  room: Room,
+  participantId: string,
+): Participant | undefined {
   const participant = room.participants.get(participantId);
   if (!participant) return undefined;
-  for (const [sid, pid] of room.sockets) if (pid === participantId) room.sockets.delete(sid);
+  for (const [sid, pid] of room.sockets) {
+    if (pid === participantId) room.sockets.delete(sid);
+  }
   room.participants.delete(participantId);
   if (room.hostParticipantId === participantId) {
     const next = room.participants.values().next().value;
     room.hostParticipantId = next ? next.id : "";
   }
-  persistRoom(room);
+  return participant;
+}
+
+/** Remove a participant by id (admin moderation, including remote members). */
+export function removeParticipantById(room: Room, participantId: string): Participant | undefined {
+  const participant = removeParticipantLocalOnly(room, participantId);
+  if (participant) persistRoom(room);
   return participant;
 }
 

@@ -38,7 +38,14 @@ export type RoomEvent =
   | { kind: "message"; roomId: string; message: unknown }
   | { kind: "clear"; roomId: string }
   | { kind: "seen"; roomId: string; participantId: string; messageId: string }
-  | { kind: "rename"; roomId: string; participantId: string; name: string };
+  | { kind: "rename"; roomId: string; participantId: string; name: string }
+  /**
+   * Cluster-wide member removal (admin kick): every instance evicts the
+   * participant's sockets it seats and drops their local state. Published by
+   * the moderating instance BEFORE the authoritative removal snapshot so no
+   * instance can resurrect the member from a stale local socket view.
+   */
+  | { kind: "kick"; roomId: string; participantId: string; reason?: string };
 
 export type RoomEventEnvelope = RoomEvent & {
   /** Instance that originated the event, so the sender ignores its echo. */
