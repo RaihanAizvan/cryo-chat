@@ -15,6 +15,7 @@ import { loadFromStore as loadBans } from "./bans.js";
 import { getSettings, loadFromStore as loadSettings } from "./settings.js";
 import { mountAdminRoutes } from "./admin.js";
 import { store, createRedisClient } from "./store.js";
+import { loadStickerPack } from "./pack.js";
 
 const app = createHttpApp();
 const server = http.createServer(app);
@@ -83,6 +84,13 @@ attachClusterModeration(io);
 async function main(): Promise<void> {
   await store.init();
   await Promise.all([loadSessions(), loadBans(), loadSettings()]);
+  // Sticker pack: load Cloudinary metadata once and start the refresh timer.
+  // Fails soft and never blocks listen — an empty pack is harmless.
+  void loadStickerPack().then((count) => {
+    console.log(
+      `[cryo] sticker pack: ${count === null ? "disabled" : `${count} stickers`}`,
+    );
+  });
   server.listen(config.port, () => {
     console.log(`[cryo] server listening on http://localhost:${config.port}`);
   });
