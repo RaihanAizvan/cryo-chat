@@ -85,8 +85,9 @@ walkthrough and [`DEPLOYMENT.md`](DEPLOYMENT.md) for hosting.
 
 The full guide is in [`DEPLOYMENT.md`](DEPLOYMENT.md). Quick version:
 
-- **Easiest:** one app serving both frontend and backend. Root `./`, build `npm install && npm run build`, start `npm start`.
-- **Alternative:** frontend on **Vercel** (`client/` folder), backend on a persistent host, bridged with `VITE_SERVER_URL` + `CORS_ORIGIN`.
+  
+
+- **Easiest:** one **Abasthan** or **Render** app serving both frontend + backend. Root `./`, build `npm install && npm run build`, start `npm start` (Render: use the bundled `render.yaml`).
 
 ## CI
 
@@ -97,10 +98,12 @@ a smoke e2e of the admin API. Vercel preview builds exclude test files via
 
 ## Stack
 
-- **Frontend:** React 18, Vite 6, TypeScript, Tailwind
-- **Backend:** Node, Express 4, Socket.IO 4 (esbuild-bundled)
-- **Tooling:** npm workspaces, Vitest 5, GitHub Actions, tsx, concurrently
-- **Hosting:** a persistent host (and Vercel if you split the frontend)
+Because sockets + in-memory rooms need a **persistent** process, the backend runs on a persistent Node host (not serverless): **Abasthan** or **Render**. In the usual setup, the backend also serves the built frontend, so the whole thing lives on one URL. Details in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+  
+
+Both already work out of the box.
+
+  
 
 ---
 
@@ -112,7 +115,19 @@ a smoke e2e of the admin API. Vercel preview builds exclude test files via
 
 The honest trade-off: it's not for things you need to keep. It's for the here-and-now.
 
-## Quick FAQ
+- **Tooling:** npm workspaces, tsx, concurrently
+
+- **Hosting:** Abasthan or Render (and Vercel if you split it)
+
+  
+
+---
+
+  
+
+## ❓ Quick FAQ
+
+  
 
 **Will you save my messages?**
 No. In-memory only, pruned by a timer. Nothing touches a disk database.

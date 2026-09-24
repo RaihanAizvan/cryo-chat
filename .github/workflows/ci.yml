@@ -15,6 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # Redis powers the cross-instance moderation integration test
+    # (server/src/cluster.e2e.test.ts) which bootstraps two servers against it.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4

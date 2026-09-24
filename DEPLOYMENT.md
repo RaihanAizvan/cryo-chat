@@ -2,14 +2,19 @@
 
 Cryo Chat is a monorepo with a React frontend and a Node+Socket.IO backend.
 
-It can be hosted two ways:
+It can be hosted three ways:
 
-1. **One Abasthan app** (recommended) — the server serves the built frontend and
-   the real-time backend on a single origin.
+1. **One persistent Node app** (recommended) — the server serves the built
+   frontend and the real-time backend on a single origin. Works on **Abasthan**
+   or **Render** (the two supported hosts).
 2. **Split hosting** — frontend on Vercel, backend on a persistent Node host.
 
 > The Socket.IO backend cannot run on serverless (e.g. Vercel functions): it holds
 > all room/message state in memory and keeps WebSocket connections alive.
+
+The app is deployable to **both** hosts from the same repo, with the same env
+var names and the same build/start commands, so migrating or running a backup
+instance is a copy of config — no code differences.
 
 ## Option 1 — One Abasthan app (recommended)
 
@@ -53,6 +58,42 @@ command) and handles `/socket.io` WebSockets on the same domain — no CORS need
 - **Vercel (frontend):** set the dashboard root directory to `client`, then add
   env var `VITE_SERVER_URL=https://<your-backend>.abasthan.app`.
   The client connects to that URL via Socket.IO.
+
+## Option 3 — Same app on Render (alongside Abasthan)
+
+Render runs a persistent Node web service, so the whole app fits in one service
+there too, exactly like Abasthan. No code changes are required — the server
+serves `client/dist`, reads the injected `PORT`, and exposes `GET /health`.
+The client uses WebSocket-only transport, so Render's load balancer needs no
+sticky sessions (even if you later scale to multiple instances).
+
+**Deploy (`render.yaml` in the repo root):**
+- **Blueprint (recommended):** dashboard → New → Blueprint → connect this repo.
+  Fill in the prompted secrets (same values you use on Abasthan), click Apply.
+  The `render.yaml` sets the build/start commands, health check, Node version,
+  and env vars automatically.
+- **Manual:** New → Web Service → this repo, then:
+  - **Build command:** `npm install && npm run build`
+  - **Start command:** `npm start`
+  - **Health check path:** `/health`
+  - **Environment variables:** `GIPHY_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
+    `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CLOUDINARY_UPLOAD_PRESET`,
+    `ADMIN_KEY` — copy the values you set on Abasthan so both hosts behave the
+    same. `PORT` is injected by Render automatically.
+
+**Caveats to know:**
+- **Free tier sleeps.** On the free plan Render spins the service down after
+  ~15 minutes without traffic; WebSocket clients get disconnected and in-memory
+  rooms are lost on wake-up. Use a paid plan (default `starter`) for a real
+  chat, or accept the spin-down on a sandbox.
+- **No Redis here (memory mode).** Each host keeps its own rooms/messages in
+  process memory. That's fine for one instance per host and for a backup/mirror
+  URL, but the two hosts do **not** share state — a room created on Abasthan
+  isn't visible on Render.
+- **Media uploads** behave the same as on Abasthan: in-memory fallback unless
+  Cloudinary is configured, so set the Cloudinary vars to avoid losing uploads
+  to a restart/deploy (Render filesystem is ephemeral except attached disks,
+  which would cap you to a single instance).
 
 ### Local development
 Vite (in `client/`) proxies `/socket.io` and `/health` and `/api` to

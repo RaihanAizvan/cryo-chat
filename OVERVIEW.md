@@ -18,9 +18,9 @@ short while, then vanish. Like a chat that self-destructs.
 
 - **Frontend** — React + Vite + Tailwind.
 - **Backend** — Node + Express + **Socket.IO**, holds everything **in memory**.
-  Runs on a **persistent** host (new: **Abasthan**) because WebSocket rooms and
-  state can't survive serverless cold starts. The server also serves the built
-  frontend, so the whole app runs from a single Abasthan app.
+  Runs on a **persistent** host (**Abasthan** or **Render**) because WebSocket
+  rooms and state can't survive serverless cold starts. The server also serves
+  the built frontend, so the whole app runs from a single host.
 - **Shared** — one small `@cryo/shared` package with the message/room protocol
   types used by both sides.
 - Live via WebSocket: messages, who's online, join/leave, read receipts.
@@ -33,5 +33,5 @@ short while, then vanish. Like a chat that self-destructs.
 
 ## Workspaces
 - `client/` — React app (builds to `client/dist`, served by the backend).
-- `server/` — Socket.IO server (the one Abasthan web service, `npm start`).
+- `server/` — Socket.IO server (the single web service on Abasthan/Render, `npm start`).
 - `shared/` — shared protocol types.

@@ -38,7 +38,14 @@ export type RoomEvent =
   | { kind: "message"; roomId: string; message: unknown }
   | { kind: "clear"; roomId: string }
   | { kind: "seen"; roomId: string; participantId: string; messageId: string }
-  | { kind: "rename"; roomId: string; participantId: string; name: string };
+  | { kind: "rename"; roomId: string; participantId: string; name: string }
+  /**
+   * Cluster-wide member removal (admin kick): every instance evicts the
+   * participant's sockets it seats and drops their local state. Published by
+   * the moderating instance BEFORE the authoritative removal snapshot so no
+   * instance can resurrect the member from a stale local socket view.
+   */
+  | { kind: "kick"; roomId: string; participantId: string; reason?: string };
 
 export type RoomEventEnvelope = RoomEvent & {
   /** Instance that originated the event, so the sender ignores its echo. */
@@ -81,9 +88,15 @@ export interface Store {
   saveSettings(settings: SettingsDict): Promise<void>;
 
   loadRooms(): Promise<RoomSnapshot[]>;
+  /** Hydrate a single room by id (cache miss / cross-instance read). */
+  loadRoom(id: string): Promise<RoomSnapshot | null>;
+  /** Hydrate a room by its current code (join by code without caching all). */
+  loadRoomByCode(code: string): Promise<RoomSnapshot | null>;
   saveRoom(room: RoomSnapshot): Promise<void>;
   deleteRoom(id: string): Promise<void>;
   appendMessage(input: AppendMessageInput): Promise<void>;
+  /** Drop a room's persisted message list (room:clear). */
+  clearRoomMessages(roomId: string): Promise<void>;
   publishRoom(event: RoomEvent): Promise<void>;
 
   /** Sliding-window check. Returns true when the call is allowed. */
@@ -131,9 +144,16 @@ class MemoryStore implements Store {
   async loadRooms(): Promise<RoomSnapshot[]> {
     return [];
   }
+  async loadRoom(): Promise<RoomSnapshot | null> {
+    return null;
+  }
+  async loadRoomByCode(): Promise<RoomSnapshot | null> {
+    return null;
+  }
   async saveRoom(): Promise<void> {}
   async deleteRoom(): Promise<void> {}
   async appendMessage(): Promise<void> {}
+  async clearRoomMessages(): Promise<void> {}
   async publishRoom(): Promise<void> {}
   private buckets = new Map<string, { count: number; resetAt: number }>();
   async rateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
@@ -376,30 +396,50 @@ class RedisStore implements Store {
     await this.publish("settings", settings);
   }
 
+  /** Read and decode one room's meta/participants/messages from Redis. */
+  private async readRoom(id: string): Promise<RoomSnapshot | null> {
+    const [meta, people, messages] = await Promise.all([
+      this.cmd.hgetall(this.roomKey(id)),
+      this.cmd.hgetall(this.roomPeople(id)),
+      this.cmd.lrange(this.roomMessages(id), 0, -1),
+    ]);
+    // A stale index entry (room expired, keys gone) is simply skipped.
+    if (!meta || !meta.code) return null;
+    const persistent = meta.persistent === "1";
+    return {
+      id,
+      code: meta.code,
+      hostParticipantId: meta.host ?? "",
+      createdAt: Number(meta.createdAt ?? 0),
+      expiresAt: persistent ? 0 : Number(meta.expiresAt ?? 0),
+      persistent,
+      participants: Object.values(people).map((j) => JSON.parse(j)),
+      messages: messages.map((j) => JSON.parse(j)),
+    };
+  }
+
   async loadRooms(): Promise<RoomSnapshot[]> {
     const ids = await this.cmd.smembers(`${this.p}:rooms`);
     const out: RoomSnapshot[] = [];
     for (const id of ids) {
-      const [meta, people, messages] = await Promise.all([
-        this.cmd.hgetall(this.roomKey(id)),
-        this.cmd.hgetall(this.roomPeople(id)),
-        this.cmd.lrange(this.roomMessages(id), 0, -1),
-      ]);
-      // A stale index entry (room expired, keys gone) is simply skipped.
-      if (!meta || !meta.code) continue;
-      const persistent = meta.persistent === "1";
-      out.push({
-        id,
-        code: meta.code,
-        hostParticipantId: meta.host ?? "",
-        createdAt: Number(meta.createdAt ?? 0),
-        expiresAt: persistent ? 0 : Number(meta.expiresAt ?? 0),
-        persistent,
-        participants: Object.values(people).map((j) => JSON.parse(j)),
-        messages: messages.map((j) => JSON.parse(j)),
-      });
+      const room = await this.readRoom(id);
+      if (room) out.push(room);
     }
     return out;
+  }
+
+  async loadRoom(id: string): Promise<RoomSnapshot | null> {
+    return this.readRoom(id);
+  }
+
+  async loadRoomByCode(code: string): Promise<RoomSnapshot | null> {
+    const id = await this.cmd.get(this.codeKey(code));
+    if (!id) return null;
+    const room = await this.readRoom(id);
+    // A claim whose room keys already expired would otherwise block the code
+    // forever; clear it so the code can be recreated.
+    if (!room) await this.cmd.del(this.codeKey(code));
+    return room;
   }
 
   async saveRoom(room: RoomSnapshot): Promise<void> {
@@ -470,6 +510,10 @@ class RedisStore implements Store {
     // the change locally) can ignore its own echo and avoid double-applying.
     const envelope: RoomEventEnvelope = { ...event, origin: config.instanceId };
     await this.publish("room", envelope);
+  }
+
+  async clearRoomMessages(roomId: string): Promise<void> {
+    await this.cmd.del(this.roomMessages(roomId));
   }
 
   async rateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
