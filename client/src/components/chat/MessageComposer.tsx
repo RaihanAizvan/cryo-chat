@@ -218,9 +218,24 @@ export function MessageComposer({
     hadKeyboardRef.current = wasFocused || keyboardInset() > 8;
     const el = document.activeElement;
     if (el instanceof HTMLElement) el.blur();
-    setClosingTray(false);
     void preloadStickers(true);
-    setGifOpen(true);
+    if (hadKeyboardRef.current) {
+      // The keyboard is up: hold the bar at tray height while it slides away,
+      // then reveal the tray. Opening both at once makes the tray flash above
+      // the keyboard for a frame.
+      setClosingTray(true);
+      waitUntil(
+        () => keyboardInset() <= 8,
+        () => {
+          setClosingTray(false);
+          setGifOpen(true);
+        },
+        600,
+      );
+    } else {
+      setClosingTray(false);
+      setGifOpen(true);
+    }
   };
 
   /**
