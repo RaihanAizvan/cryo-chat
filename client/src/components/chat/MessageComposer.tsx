@@ -254,12 +254,6 @@ export function MessageComposer({
     }
   };
 
-  /** Close dismissively (tap outside, Escape): no keyboard comes back. */
-  const closeTraySilent = () => {
-    setGifOpen(false);
-    setClosingTray(false);
-  };
-
   useEffect(() => {
     return () => {
       if (pendingObj) URL.revokeObjectURL(pendingObj);
@@ -676,7 +670,7 @@ export function MessageComposer({
             setTimeout(() => stickerInputRef.current?.click(), 0);
           }}
           onPickFile={() => gifInputRef.current?.click()}
-          onClose={closeTraySilent}
+          onClose={closeTray}
         />
       )}
 
