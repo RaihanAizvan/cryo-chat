@@ -40,6 +40,23 @@ interface PendingMedia {
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
+/** On-screen keyboard inset in px right now (0 when no keyboard is open). */
+function keyboardInset(): number {
+  if (typeof window === "undefined" || !window.visualViewport) return 0;
+  const vv = window.visualViewport;
+  return Math.max(0, window.innerHeight - (vv.height + (vv.offsetTop || 0)));
+}
+
+/** Poll for `cond()` to return true (or a timeout), then run `done()`. */
+function waitUntil(cond: () => boolean, done: () => void, timeoutMs = 700) {
+  const start = performance.now();
+  const step = () => {
+    if (cond() || performance.now() - start >= timeoutMs) return done();
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 /** Snippet shown in the reply pill: the message text, or a media label. */
 function replyPreview(m: PublicMessage): string {
   if (m.text) return m.text;
@@ -63,6 +80,12 @@ export function MessageComposer({
   const [text, setText] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+  // Closing is animated: the composer stays raised at tray height until the
+  // keyboard is fully back, so the input never dips while transitioning.
+  const [closingTray, setClosingTray] = useState(false);
+  // Whether the keyboard was up before the tray opened — closing restores it so
+  // composing continues exactly where the user left off.
+  const hadKeyboardRef = useRef(false);
   const [pending, setPending] = useState<PendingMedia | null>(null);
   // Track the object URL separately so the sheet closes before we revoke it.
   const [pendingObj, setPendingObj] = useState<string | null>(null);
@@ -87,8 +110,9 @@ export function MessageComposer({
   // While the media tray is open the bar sits above it (WhatsApp-style: the
   // tray fills the space the keyboard would occupy). The keyboard inset still
   // applies on top so focusing the tray's search box raises everything above
-  // the keyboard instead of covering it.
-  const trayOffset = gifOpen ? MEDIA_TRAY_HEIGHT : 0;
+  // the keyboard instead of covering it. While `closingTray` waits for the
+  // keyboard to come back, the bar stays raised so nothing dips.
+  const trayOffset = gifOpen || closingTray ? MEDIA_TRAY_HEIGHT : 0;
 
   const onChange = (value: string) => {
     setText(value);
@@ -185,6 +209,34 @@ export function MessageComposer({
   const closeAllPanels = () => {
     setEmojiOpen(false);
     setGifOpen(false);
+  };
+
+  /** Open the tray: drop the keyboard (WhatsApp-style slide-in) + warm the pack. */
+  const openTray = () => {
+    const ta = taRef.current;
+    const wasFocused = !!ta && document.activeElement === ta;
+    hadKeyboardRef.current = wasFocused || keyboardInset() > 8;
+    const el = document.activeElement;
+    if (el instanceof HTMLElement) el.blur();
+    setClosingTray(false);
+    void preloadStickers(true);
+    setGifOpen(true);
+  };
+
+  /**
+   * Close the tray. If a keyboard was up before it opened, bring it back and
+   * hold the bar at tray height until it has fully risen so the input field
+   * stays exactly where it was.
+   */
+  const closeTray = () => {
+    setGifOpen(false);
+    if (hadKeyboardRef.current) {
+      setClosingTray(true);
+      taRef.current?.focus();
+      waitUntil(() => keyboardInset() > 8, () => setClosingTray(false));
+    } else {
+      setClosingTray(false);
+    }
   };
 
   useEffect(() => {
@@ -514,20 +566,7 @@ export function MessageComposer({
         </button>
 
         <button
-          onClick={() => {
-            setEmojiOpen(false);
-            setGifOpen((v) => {
-              if (!v) {
-                // WhatsApp-style: the tray slides in where the keyboard was, so
-                // drop the keyboard on open. Also re-pull the pack in the
-                // background so re-openings reflect new uploads instantly.
-                const el = document.activeElement;
-                if (el instanceof HTMLElement) el.blur();
-                void preloadStickers(true);
-              }
-              return !v;
-            });
-          }}
+          onClick={() => (gifOpen ? closeTray() : openTray())}
           aria-label={gifOpen ? "Close sticker picker" : "Open sticker picker"}
           className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
             gifOpen
@@ -613,7 +652,6 @@ export function MessageComposer({
 
       {!pending && gifOpen && (
         <GifPicker
-          initialMode="pack"
           onPickPackSticker={sendPackSticker}
           onPickGif={(f) => beginPending(f)}
           onPickSticker={(f) => void sendSticker(f)}
@@ -622,7 +660,7 @@ export function MessageComposer({
             setTimeout(() => stickerInputRef.current?.click(), 0);
           }}
           onPickFile={() => gifInputRef.current?.click()}
-          onClose={() => setGifOpen(false)}
+          onClose={closeTray}
         />
       )}
 
