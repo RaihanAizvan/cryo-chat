@@ -426,25 +426,32 @@ export function GifPicker({
                           </>
                         )}
                         {restCells.length > 0 && (
-                          <div className="grid grid-cols-4 gap-1.5 pt-2 pr-0.5">
-                            {restCells.map((s) => (
-                              <button
-                                key={s.id}
-                                type="button"
-                                onClick={() => choosePackSticker(s.id)}
-                                aria-label={s.name ?? "Choose sticker"}
-                                className="group relative aspect-square overflow-hidden rounded-lg bg-base-border transition-colors hover:bg-base-border2"
-                              >
-                                <img
-                                  src={s.url}
-                                  alt={s.name ?? ""}
-                                  loading="lazy"
-                                  draggable={false}
-                                  className="h-full w-full object-contain transition-transform duration-150 group-hover:scale-105"
-                                />
-                              </button>
-                            ))}
-                          </div>
+                          <>
+                            {recentCells.length > 0 && (
+                              <p className="px-0.5 pt-3 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                                Other stickers
+                              </p>
+                            )}
+                            <div className="grid grid-cols-4 gap-1.5 pt-1 pr-0.5">
+                              {restCells.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => choosePackSticker(s.id)}
+                                  aria-label={s.name ?? "Choose sticker"}
+                                  className="group relative aspect-square overflow-hidden rounded-lg bg-base-border transition-colors hover:bg-base-border2"
+                                >
+                                  <img
+                                    src={s.url}
+                                    alt={s.name ?? ""}
+                                    loading="lazy"
+                                    draggable={false}
+                                    className="h-full w-full object-contain transition-transform duration-150 group-hover:scale-105"
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          </>
                         )}
                       </>
                     ) : (
