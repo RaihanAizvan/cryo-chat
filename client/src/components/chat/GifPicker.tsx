@@ -121,6 +121,25 @@ export function GifPicker({
   onPickFile,
   onClose,
 }: Props) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Kept in a ref so the outside-tap listener (added once) always sees the
+  // latest onClose without re-subscribing every render.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Tap anywhere outside the tray panel (the chat above, the composer bar)
+  // dismisses it — WhatsApp behaviour.
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target instanceof Node ? e.target : null;
+      if (panelRef.current?.contains(t)) return;
+      onCloseRef.current();
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
   const [mode, setMode] = useState<TrayMode>(initialTab);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GifEntry[]>([]);
@@ -285,6 +304,7 @@ export function GifPicker({
   return (
     <div className="absolute inset-x-0 top-full z-10">
       <div
+        ref={panelRef}
         className="cryo-in mx-auto flex max-w-2xl flex-col overflow-hidden border-t border-base-border2 bg-base/95 backdrop-blur md:rounded-t-2xl"
         style={{ height: MEDIA_TRAY_HEIGHT }}
       >
