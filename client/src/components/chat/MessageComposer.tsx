@@ -223,20 +223,12 @@ export function MessageComposer({
     if (el instanceof HTMLElement) el.blur();
     void preloadStickers(true);
     if (hadKeyboardRef.current) {
-      // The keyboard is up: hold the bar at tray height while it slides away,
-      // then reveal the tray. Opening both at once makes the tray flash above
-      // the keyboard for a frame.
-      setClosingTray(true);
-      waitUntil(
-        () => keyboardInset() <= 8,
-        () => {
-          setClosingTray(false);
-          setGifOpen(true);
-        },
-        600,
-      );
+      // The keyboard is up: let it finish sliding away first, then reveal the
+      // tray. Raising the bar to tray height while the keyboard is still up
+      // stacks the tray area on top of it for a frame — the bar just follows
+      // the inset down like a normal keyboard close instead.
+      waitUntil(() => keyboardInset() <= 8, () => setGifOpen(true), 600);
     } else {
-      setClosingTray(false);
       setGifOpen(true);
     }
   };
