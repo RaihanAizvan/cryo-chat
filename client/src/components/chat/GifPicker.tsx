@@ -1,17 +1,25 @@
-import { useEffect, useRef, useState } from "react";
-import { IconImage, IconSearch, IconSticker } from "../ui/Icon";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  IconEmoji,
+  IconGrid,
+  IconImage,
+  IconSearch,
+  IconSparkle,
+  IconSticker,
+} from "../ui/Icon";
+import { EmojiPicker } from "./EmojiPicker";
 import { peekStickers, preloadStickers, type PackSticker } from "../../lib/api";
 import { MEDIA_TRAY_HEIGHT } from "../../lib/mediaTray";
 
 interface Props {
-  /** Which tab is shown when the tray opens (composer opens on the pack). */
-  initialMode?: "pack" | "gif" | "sticker";
   /** Pack sticker picked: send it instantly by reference (no upload). */
   onPickPackSticker: (mediaId: string) => void;
   /** Called with a gif/sticker's bytes when the user picks one from the grid. */
   onPickGif: (file: File) => void;
   /** Stickers send instantly (WhatsApp-style) instead of opening the caption sheet. */
   onPickSticker: (file: File) => void;
+  /** Emoji tab: insert into the message text (tray stays open). */
+  onPickEmoji: (emoji: string) => void;
   /** Sticker tab: user wants to build a sticker from one of their own images. */
   onPickStickerFromImage: () => void;
   /** GIF tab: upload the user's own .gif file. */
@@ -19,23 +27,40 @@ interface Props {
   onClose: () => void;
 }
 
+type TrayMode = "pack" | "gif" | "sticker" | "emoji";
+
 /**
- * Sticker / GIF picker, custom-first. Renders as a fixed-height tray that
- * replaces the keyboard area beneath the composer (WhatsApp-style): it is
- * always the same height (see MEDIA_TRAY_HEIGHT), so the loading state can't
- * resize it — the pack and GIF grids show skeleton placeholders at full size
- * until the bytes arrive.
- *
- * 1. **Pack** tab — the project's Cloudinary sticker pack (metadata from
- *    `GET /api/stickers`, preloaded so it's ready before the tray opens);
- *    picking sends instantly by reference, no upload. Hidden when the server
- *    says the pack isn't configured (404).
- * 2. "Make a sticker" / "Upload a GIF" — always available.
- * 3. **GIF** / **Sticker** tabs — Giphy search runs server-side
- *    (`GET /api/giphy`) so the key stays server-side; hidden once the server
- *    says the key is missing (503). Picked media is fetched from Giphy's CDN
- *    and funneled into the normal upload path, so it stays ephemeral.
+ * The tray re-opens on the tab you last used (WhatsApp-style), persisted so it
+ * also survives a page reload. Falls back to the pack when no pack is
+ * configured.
  */
+const LAST_TRAY_TAB_KEY = "cryo:lastTrayTab";
+
+function rememberTab(id: TrayMode) {
+  try {
+    window.localStorage.setItem(LAST_TRAY_TAB_KEY, id);
+  } catch {
+    // private mode etc. — reverting to defaults is fine
+  }
+}
+
+function readLastTab(): TrayMode {
+  try {
+    const v = window.localStorage.getItem(LAST_TRAY_TAB_KEY);
+    if (v === "pack" || v === "gif" || v === "sticker" || v === "emoji") {
+      return v;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return "pack";
+}
+
+function initialTab(): TrayMode {
+  const last = readLastTab();
+  if (last === "pack" && peekStickers() === null) return "sticker";
+  return last;
+}
 
 /** Server returned 503 because GIPHY_API_KEY is not configured. */
 class GiphyKeyError extends Error {}
@@ -68,18 +93,35 @@ function SkeletonGrid({ heart }: { heart?: boolean }) {
   );
 }
 
+/**
+ * Sticker / GIF / emoji picker, custom-first. Renders as a fixed-height tray
+ * that replaces the keyboard area beneath the composer (WhatsApp-style): it is
+ * always the same height (see MEDIA_TRAY_HEIGHT), so the loading state can't
+ * resize it — the pack and GIF grids show skeleton placeholders at full size
+ * until the bytes arrive. The pack / GIF / sticker / emoji tabs live in a dock
+ * at the bottom, and the tray re-opens on whichever tab you used last.
+ *
+ * 1. **Pack** tab — the project's Cloudinary sticker pack (metadata from
+ *    `GET /api/stickers`, preloaded so it's ready before the tray opens);
+ *    picking sends instantly by reference, no upload. Hidden when the server
+ *    says the pack isn't configured (404).
+ * 2. "Make a sticker" / "Upload a GIF" — always available.
+ * 3. **GIF** / **Sticker** tabs — Giphy search runs server-side
+ *    (`GET /api/giphy`) so the key stays server-side; hidden once the server
+ *    says the key is missing (503). Picked media is fetched from Giphy's CDN
+ *    and funneled into the normal upload path, so it stays ephemeral.
+ * 4. **Emoji** tab — the inline emoji sheet.
+ */
 export function GifPicker({
-  initialMode = "pack",
   onPickPackSticker,
   onPickGif,
   onPickSticker,
+  onPickEmoji,
   onPickStickerFromImage,
   onPickFile,
   onClose,
 }: Props) {
-  const [mode, setMode] = useState<"pack" | "gif" | "sticker">(() =>
-    peekStickers() === null ? "sticker" : initialMode,
-  );
+  const [mode, setMode] = useState<TrayMode>(initialTab);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GifEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,6 +142,15 @@ export function GifPicker({
     packRef.current = pack;
   }, [pack]);
 
+  const switchTab = (id: TrayMode) => {
+    rememberTab(id);
+    setMode(id);
+    if (id === "pack") {
+      setResults([]);
+      setError("");
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     preloadStickers().then((list) => {
@@ -107,7 +158,10 @@ export function GifPicker({
       setPack(list);
       // No pack → don't strand the user on the pack tab (mode read live via
       // the functional update).
-      setMode((m) => (list === null && m === "pack" ? "sticker" : m));
+      if (list === null) {
+        rememberTab("sticker");
+        setMode((m) => (m === "pack" ? "sticker" : m));
+      }
     });
     return () => {
       cancelled = true;
@@ -115,7 +169,7 @@ export function GifPicker({
   }, []);
 
   useEffect(() => {
-    if (mode === "pack") return;
+    if (mode === "pack" || mode === "emoji") return;
     const q = query.trim();
     const mySeq = ++seq.current;
     const kind = mode === "sticker" ? "stickers" : "gifs";
@@ -149,9 +203,10 @@ export function GifPicker({
           setResults([]);
           // No Giphy key → jump to the pack (custom-first) when one exists.
           const p = packRef.current;
-          setMode((m) =>
-            m !== "pack" && p !== null && p !== undefined ? "pack" : m,
-          );
+          if (p !== null && p !== undefined) {
+            rememberTab("pack");
+            setMode((m) => (m !== "pack" ? "pack" : m));
+          }
         } else {
           setError("GIF search isn't responding. Try again.");
           setResults([]);
@@ -197,41 +252,45 @@ export function GifPicker({
 
   const packTabVisible = pack !== undefined && pack !== null;
 
+  // Bottom dock: the tray's tab bar, centered. The pack tab is the project's
+  // Cloudinary pack; GIF/Sticker (Giphy) appear while search is available;
+  // Emoji always.
+  const dockTabs: { id: TrayMode; label: string; icon: ReactNode }[] = [
+    ...(packTabVisible
+      ? [
+          {
+            id: "pack" as const,
+            label: "Pack",
+            icon: <IconSticker width={14} height={14} />,
+          },
+        ]
+      : []),
+    ...(searchEnabled
+      ? [
+          {
+            id: "gif" as const,
+            label: "GIF",
+            icon: <IconGrid width={14} height={14} />,
+          },
+          {
+            id: "sticker" as const,
+            label: "Sticker",
+            icon: <IconSparkle width={14} height={14} />,
+          },
+        ]
+      : []),
+    { id: "emoji" as const, label: "Emoji", icon: <IconEmoji width={14} height={14} /> },
+  ];
+
   return (
     <div className="absolute inset-x-0 top-full z-10">
       <div
         className="cryo-in mx-auto flex max-w-2xl flex-col overflow-hidden border-t border-base-border2 bg-base/95 backdrop-blur md:rounded-t-2xl"
         style={{ height: MEDIA_TRAY_HEIGHT }}
       >
-        <div className="flex shrink-0 items-center gap-2 px-2 pt-2">
-          <div className="flex shrink-0 rounded-full bg-base-border p-0.5">
-            {([
-              ...(packTabVisible ? [["pack", "Pack"] as const] : []),
-              ...(searchEnabled ? [["gif", "GIF"] as const, ["sticker", "Sticker"] as const] : []),
-            ]).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setMode(id);
-                  if (id === "pack") {
-                    setResults([]);
-                    setError("");
-                  }
-                }}
-                aria-pressed={mode === id}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide transition-colors ${
-                  mode === id
-                    ? "bg-base-raised text-accent shadow-sm"
-                    : "text-ink-faint hover:text-ink-muted"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {searchEnabled && mode !== "pack" && (
-            <div className="relative min-w-0 flex-1">
+        {searchEnabled && (mode === "gif" || mode === "sticker") && (
+          <div className="shrink-0 px-2 pt-2">
+            <div className="relative">
               <IconSearch
                 width={14}
                 height={14}
@@ -245,138 +304,165 @@ export function GifPicker({
                 className="w-full rounded-3xl border border-base-border2 bg-base py-1.5 pl-8 pr-3 text-[13px] text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
               />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {mode === "pack" ? (
-            pack === undefined ? (
-              <SkeletonGrid heart />
-            ) : pack !== null ? (
-              <>
-                {pack.length > 0 ? (
-                  <div className="grid grid-cols-4 gap-1.5 pt-2 pr-0.5">
-                    {pack.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => onPickPackSticker(s.id)}
-                        aria-label={s.name ?? "Choose sticker"}
-                        className="group relative aspect-square overflow-hidden rounded-lg bg-base-border transition-colors hover:bg-base-border2"
-                      >
-                        <img
-                          src={s.url}
-                          alt={s.name ?? ""}
-                          loading="lazy"
-                          draggable={false}
-                          className="h-full w-full object-contain transition-transform duration-150 group-hover:scale-105"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="py-6 text-center text-xs leading-relaxed text-ink-faint">
-                    No stickers in the pack yet. Add images under the{" "}
-                    <code className="rounded bg-base-border px-1">
-                      cryo/stickers
-                    </code>{" "}
-                    folder in Cloudinary.
-                  </p>
-                )}
-                <button
-                  type="button"
-                  onClick={onPickStickerFromImage}
-                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
-                >
-                  <IconSticker width={16} height={16} />
-                  Make a sticker
-                </button>
-              </>
-            ) : null
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {mode === "emoji" ? (
+            <EmojiPicker onPick={onPickEmoji} />
           ) : (
-            <>
-              {loading ? (
-                <SkeletonGrid heart={false} />
-              ) : (
-                <>
-                  {searchEnabled && results.length > 0 && (
-                    <div className="grid grid-cols-4 gap-1.5 pt-2 pr-0.5">
-                      {results.map((r) => (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => void pick(r)}
-                          disabled={busyId !== null}
-                          aria-label={r.title ?? (mode === "sticker" ? "Choose sticker" : "Choose GIF")}
-                          className={`group relative overflow-hidden rounded-lg bg-base-border hover:bg-base-border2 ${
-                            mode === "sticker" ? "aspect-square" : "aspect-video"
-                          }`}
-                        >
-                          <img
-                            src={r.preview}
-                            alt={r.title ?? ""}
-                            loading="lazy"
-                            className={`h-full w-full object-cover transition-opacity ${
-                              busyId === r.id ? "opacity-40" : "group-hover:opacity-80"
-                            }`}
-                          />
-                          {busyId === r.id && (
-                            <span className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-muted">
-                              …
-                            </span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {!searchEnabled && (
-                    <p className="py-4 text-left text-[11px] leading-relaxed text-ink-faint">
-                      Set{" "}
-                      <code className="rounded bg-base-border px-1">GIPHY_API_KEY</code>{" "}
-                      (server env) to
-                      search. You can still {mode === "sticker" ? "make your own." : "upload your own."}
-                    </p>
-                  )}
-
-                  {error && (
-                    <p className="py-2 text-center text-xs font-medium text-rose-400">
-                      {error}
-                    </p>
-                  )}
-
-                  {searchEnabled &&
-                    !loading &&
-                    results.length === 0 &&
-                    !error && (
-                      <p className="py-4 text-center text-xs text-ink-faint">
-                        No {mode === "sticker" ? "stickers" : "GIFs"} found.
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {mode === "pack" ? (
+                pack === undefined ? (
+                  <SkeletonGrid heart />
+                ) : pack !== null ? (
+                  <>
+                    {pack.length > 0 ? (
+                      <div className="grid grid-cols-4 gap-1.5 pt-2 pr-0.5">
+                        {pack.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => onPickPackSticker(s.id)}
+                            aria-label={s.name ?? "Choose sticker"}
+                            className="group relative aspect-square overflow-hidden rounded-lg bg-base-border transition-colors hover:bg-base-border2"
+                          >
+                            <img
+                              src={s.url}
+                              alt={s.name ?? ""}
+                              loading="lazy"
+                              draggable={false}
+                              className="h-full w-full object-contain transition-transform duration-150 group-hover:scale-105"
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="py-6 text-center text-xs leading-relaxed text-ink-faint">
+                        No stickers in the pack yet. Add images under the{" "}
+                        <code className="rounded bg-base-border px-1">
+                          cryo/stickers
+                        </code>{" "}
+                        folder in Cloudinary.
                       </p>
                     )}
-
-                  {mode === "sticker" ? (
                     <button
                       type="button"
                       onClick={onPickStickerFromImage}
-                      className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
+                      className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
                     >
                       <IconSticker width={16} height={16} />
                       Make a sticker
                     </button>
+                  </>
+                ) : null
+              ) : (
+                <>
+                  {loading ? (
+                    <SkeletonGrid heart={false} />
                   ) : (
-                    <button
-                      type="button"
-                      onClick={onPickFile}
-                      className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
-                    >
-                      <IconImage width={16} height={16} />
-                      Upload a GIF
-                    </button>
+                    <>
+                      {searchEnabled && results.length > 0 && (
+                        <div className="grid grid-cols-4 gap-1.5 pt-2 pr-0.5">
+                          {results.map((r) => (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() => void pick(r)}
+                              disabled={busyId !== null}
+                              aria-label={r.title ?? (mode === "sticker" ? "Choose sticker" : "Choose GIF")}
+                              className={`group relative overflow-hidden rounded-lg bg-base-border hover:bg-base-border2 ${
+                                mode === "sticker" ? "aspect-square" : "aspect-video"
+                              }`}
+                            >
+                              <img
+                                src={r.preview}
+                                alt={r.title ?? ""}
+                                loading="lazy"
+                                className={`h-full w-full object-cover transition-opacity ${
+                                  busyId === r.id ? "opacity-40" : "group-hover:opacity-80"
+                                }`}
+                              />
+                              {busyId === r.id && (
+                                <span className="absolute inset-0 flex items-center justify-center text-[11px] text-ink-muted">
+                                  …
+                                </span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {!searchEnabled && (
+                        <p className="py-4 text-left text-[11px] leading-relaxed text-ink-faint">
+                          Set{" "}
+                          <code className="rounded bg-base-border px-1">GIPHY_API_KEY</code>{" "}
+                          (server env) to
+                          search. You can still {mode === "sticker" ? "make your own." : "upload your own."}
+                        </p>
+                      )}
+
+                      {error && (
+                        <p className="py-2 text-center text-xs font-medium text-rose-400">
+                          {error}
+                        </p>
+                      )}
+
+                      {searchEnabled &&
+                        !loading &&
+                        results.length === 0 &&
+                        !error && (
+                          <p className="py-4 text-center text-xs text-ink-faint">
+                            No {mode === "sticker" ? "stickers" : "GIFs"} found.
+                          </p>
+                        )}
+
+                      {mode === "sticker" ? (
+                        <button
+                          type="button"
+                          onClick={onPickStickerFromImage}
+                          className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
+                        >
+                          <IconSticker width={16} height={16} />
+                          Make a sticker
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={onPickFile}
+                          className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-base-border2 py-2.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border"
+                        >
+                          <IconImage width={16} height={16} />
+                          Upload a GIF
+                        </button>
+                      )}
+                    </>
                   )}
                 </>
               )}
-            </>
+            </div>
           )}
+        </div>
+
+        <div className="flex shrink-0 justify-center border-t border-base-border bg-base/50 px-3 py-1.5">
+          <div className="flex gap-0.5 rounded-full bg-base-border p-1">
+            {dockTabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => switchTab(t.id)}
+                aria-pressed={mode === t.id}
+                className={`flex h-8 items-center gap-1 rounded-full px-3 text-[11px] font-semibold uppercase tracking-wide transition-colors ${
+                  mode === t.id
+                    ? "bg-base-raised text-accent shadow-sm"
+                    : "text-ink-faint hover:text-ink-muted"
+                }`}
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
