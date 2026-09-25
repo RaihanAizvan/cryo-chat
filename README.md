@@ -125,7 +125,7 @@ The honest trade-off: it's not for things you need to keep. It's for the here-an
 
   
 
-## ❓ Quick FAQ
+## Quick FAQ
 
   
 
