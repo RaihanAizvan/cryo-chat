@@ -538,6 +538,15 @@ export function MessageComposer({
           rows={1}
           value={text}
           onChange={(e) => onChange(e.target.value)}
+          onFocus={() => {
+            // Tapping the input while the tray is open dismisses it — otherwise
+            // the keyboard and the tray would stack on top of each other.
+            if (gifOpen) {
+              setGifOpen(false);
+              setClosingTray(true);
+              waitUntil(() => keyboardInset() > 8, () => setClosingTray(false));
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               if (!isCoarse) {
