@@ -81,9 +81,6 @@ export function MessageComposer({
   // Closing is animated: the composer stays raised at tray height until the
   // keyboard is fully back, so the input never dips while transitioning.
   const [closingTray, setClosingTray] = useState(false);
-  // Whether the keyboard was up before the tray opened — closing restores it so
-  // composing continues exactly where the user left off.
-  const hadKeyboardRef = useRef(false);
   const [pending, setPending] = useState<PendingMedia | null>(null);
   // Track the object URL separately so the sheet closes before we revoke it.
   const [pendingObj, setPendingObj] = useState<string | null>(null);
@@ -223,12 +220,12 @@ export function MessageComposer({
   /** Open the tray: drop the keyboard (WhatsApp-style slide-in) + warm the pack. */
   const openTray = () => {
     const ta = taRef.current;
-    const wasFocused = !!ta && document.activeElement === ta;
-    hadKeyboardRef.current = wasFocused || keyboardInset() > 8;
+    const hadKeyboard =
+      (!!ta && document.activeElement === ta) || keyboardInset() > 8;
     const el = document.activeElement;
     if (el instanceof HTMLElement) el.blur();
     void preloadStickers(true);
-    if (hadKeyboardRef.current) {
+    if (hadKeyboard) {
       // The keyboard is up: let it finish sliding away first, then reveal the
       // tray. Raising the bar to tray height while the keyboard is still up
       // stacks the tray area on top of it for a frame — the bar just follows
@@ -240,19 +237,27 @@ export function MessageComposer({
   };
 
   /**
-   * Close the tray. If a keyboard was up before it opened, bring it back and
-   * hold the bar at tray height until it has fully risen so the input field
-   * stays exactly where it was.
+   * Close the tray via the sticker toggle: always bring the keyboard back
+   * (the toggle is also the "switch back to typing" key), holding the bar at
+   * tray height until it has fully risen so the input field stays in place.
    */
   const closeTray = () => {
     setGifOpen(false);
-    if (hadKeyboardRef.current) {
-      setClosingTray(true);
-      taRef.current?.focus();
+    setClosingTray(true);
+    taRef.current?.focus();
+    if (isCoarse) {
+      // On touch the keyboard physically rises — wait for it before lowering
+      // the bar so nothing dips. On desktop focus restores instantly.
       waitUntil(() => keyboardInset() > 8, () => setClosingTray(false));
     } else {
       setClosingTray(false);
     }
+  };
+
+  /** Close dismissively (tap outside, Escape): no keyboard comes back. */
+  const closeTraySilent = () => {
+    setGifOpen(false);
+    setClosingTray(false);
   };
 
   useEffect(() => {
@@ -671,7 +676,7 @@ export function MessageComposer({
             setTimeout(() => stickerInputRef.current?.click(), 0);
           }}
           onPickFile={() => gifInputRef.current?.click()}
-          onClose={closeTray}
+          onClose={closeTraySilent}
         />
       )}
 
