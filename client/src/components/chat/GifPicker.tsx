@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { IconImage, IconSearch, IconSticker, IconX } from "../ui/Icon";
+import { IconImage, IconSearch, IconSticker } from "../ui/Icon";
 import { peekStickers, preloadStickers, type PackSticker } from "../../lib/api";
 import { MEDIA_TRAY_HEIGHT } from "../../lib/mediaTray";
 
@@ -246,16 +246,6 @@ export function GifPicker({
               />
             </div>
           )}
-          <div className="ml-auto">
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close media picker"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ink-muted hover:bg-base-border"
-            >
-              <IconX width={16} height={16} />
-            </button>
-          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
