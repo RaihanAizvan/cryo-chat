@@ -164,17 +164,23 @@ export function MessageComposer({
   }, [text]);
 
   // Report the composer's rendered height so the message list can reserve
-  // space above it (avoids long inputs hiding the newest message).
+  // space above it (avoids long inputs hiding the newest message). While the
+  // media tray is open, reserve its height too so the newest messages scroll
+  // UP above the tray instead of being hidden behind it, exactly like the
+  // keyboard does.
   useLayoutEffect(() => {
     if (!onHeightChange) return;
     const el = barRef.current;
     if (!el) return;
-    const report = () => onHeightChange(el.offsetHeight);
+    const report = () =>
+      onHeightChange(
+        el.offsetHeight + (gifOpen || closingTray ? MEDIA_TRAY_HEIGHT : 0),
+      );
     report();
     const ro = new ResizeObserver(report);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [onHeightChange]);
+  }, [onHeightChange, gifOpen, closingTray]);
 
   const submit = () => {
     const trimmed = text.trim();
