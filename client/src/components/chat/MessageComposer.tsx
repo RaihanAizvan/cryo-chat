@@ -2,16 +2,17 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import type { MessageAttachment, PublicMessage } from "@cryo/shared";
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
-import { IconEmoji, IconImage, IconMic, IconReply, IconSend, IconSticker, IconX } from "../ui/Icon";
-import { EmojiPicker } from "./EmojiPicker";
+import { IconImage, IconMic, IconReply, IconSend, IconSticker, IconX } from "../ui/Icon";
 import { AttachmentSheet } from "./AttachmentSheet";
 import { GifPicker } from "./GifPicker";
+import { MEDIA_TRAY_HEIGHT } from "../../lib/mediaTray";
 import { VoiceRecorder } from "./VoiceRecorder";
 import {
   uploadMedia,
   getCloudinaryPreset,
   uploadToCloudinary,
   registerRemoteMedia,
+  preloadStickers,
   type UploadResult,
 } from "../../lib/api";
 import { prepareUpload } from "../../lib/image";
@@ -38,6 +39,23 @@ interface PendingMedia {
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
+/** On-screen keyboard inset in px right now (0 when no keyboard is open). */
+function keyboardInset(): number {
+  if (typeof window === "undefined" || !window.visualViewport) return 0;
+  const vv = window.visualViewport;
+  return Math.max(0, window.innerHeight - (vv.height + (vv.offsetTop || 0)));
+}
+
+/** Poll for `cond()` to return true (or a timeout), then run `done()`. */
+function waitUntil(cond: () => boolean, done: () => void, timeoutMs = 700) {
+  const start = performance.now();
+  const step = () => {
+    if (cond() || performance.now() - start >= timeoutMs) return done();
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 /** Snippet shown in the reply pill: the message text, or a media label. */
 function replyPreview(m: PublicMessage): string {
   if (m.text) return m.text;
@@ -59,8 +77,10 @@ export function MessageComposer({
   onCancelReply,
 }: Props) {
   const [text, setText] = useState("");
-  const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+  // Closing is animated: the composer stays raised at tray height until the
+  // keyboard is fully back, so the input never dips while transitioning.
+  const [closingTray, setClosingTray] = useState(false);
   const [pending, setPending] = useState<PendingMedia | null>(null);
   // Track the object URL separately so the sheet closes before we revoke it.
   const [pendingObj, setPendingObj] = useState<string | null>(null);
@@ -75,6 +95,19 @@ export function MessageComposer({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const gifInputRef = useRef<HTMLInputElement>(null);
   const stickerInputRef = useRef<HTMLInputElement>(null);
+
+  // Warm the sticker pack cache as soon as the composer mounts so the tray
+  // opens without a loading flash.
+  useEffect(() => {
+    void preloadStickers();
+  }, []);
+
+  // While the media tray is open the bar sits above it (WhatsApp-style: the
+  // tray fills the space the keyboard would occupy). The keyboard inset still
+  // applies on top so focusing the tray's search box raises everything above
+  // the keyboard instead of covering it. While `closingTray` waits for the
+  // keyboard to come back, the bar stays raised so nothing dips.
+  const trayOffset = gifOpen || closingTray ? MEDIA_TRAY_HEIGHT : 0;
 
   const onChange = (value: string) => {
     setText(value);
@@ -98,10 +131,9 @@ export function MessageComposer({
   }, [staleRec]);
 
   useEffect(() => {
-    if (!emojiOpen && !gifOpen && !pending && !rec) return;
+    if (!gifOpen && !pending && !rec) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      setEmojiOpen(false);
       setGifOpen(false);
       if (pending) {
         setPending(null);
@@ -115,7 +147,7 @@ export function MessageComposer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [emojiOpen, gifOpen, pending, rec, recBusy]);
+  }, [gifOpen, pending, rec, recBusy]);
 
   // Keep the enter key behavior: on touch, Enter inserts newline → user taps
   // the send button. On desktop, Enter sends (Shift+Enter for newline).
@@ -129,17 +161,23 @@ export function MessageComposer({
   }, [text]);
 
   // Report the composer's rendered height so the message list can reserve
-  // space above it (avoids long inputs hiding the newest message).
+  // space above it (avoids long inputs hiding the newest message). While the
+  // media tray is open, reserve its height too so the newest messages scroll
+  // UP above the tray instead of being hidden behind it, exactly like the
+  // keyboard does.
   useLayoutEffect(() => {
     if (!onHeightChange) return;
     const el = barRef.current;
     if (!el) return;
-    const report = () => onHeightChange(el.offsetHeight);
+    const report = () =>
+      onHeightChange(
+        el.offsetHeight + (gifOpen || closingTray ? MEDIA_TRAY_HEIGHT : 0),
+      );
     report();
     const ro = new ResizeObserver(report);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [onHeightChange]);
+  }, [onHeightChange, gifOpen, closingTray]);
 
   const submit = () => {
     const trimmed = text.trim();
@@ -149,11 +187,16 @@ export function MessageComposer({
     taRef.current?.focus();
   };
 
-  /** Insert an emoji at the caret (fallback: append), keeping focus in the box. */
+  /**
+   * Insert an emoji at the caret (fallback: append), keeping focus in the box.
+   * When the emoji tab is open the textarea isn't focused — append instead of
+   * stealing focus, so the tray stays open and the keyboard stays down.
+   */
   const insertEmoji = (emoji: string) => {
     const ta = taRef.current;
-    const start = ta?.selectionStart ?? text.length;
-    const end = ta?.selectionEnd ?? start;
+    const focused = !!ta && document.activeElement === ta;
+    const start = focused ? ta.selectionStart : text.length;
+    const end = focused ? ta.selectionEnd : start;
     const next = (text.slice(0, start) + emoji + text.slice(end)).slice(
       0,
       MAX_MESSAGE_LENGTH,
@@ -161,16 +204,54 @@ export function MessageComposer({
     setText(next);
     recordEmoji(emoji);
     if (onTyping) onTyping();
-    setTimeout(() => {
-      const pos = start + emoji.length;
-      ta?.focus();
-      ta?.setSelectionRange(pos, pos);
-    }, 0);
+    if (focused && ta) {
+      setTimeout(() => {
+        const pos = start + emoji.length;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      }, 0);
+    }
   };
 
   const closeAllPanels = () => {
-    setEmojiOpen(false);
     setGifOpen(false);
+  };
+
+  /** Open the tray: drop the keyboard (WhatsApp-style slide-in) + warm the pack. */
+  const openTray = () => {
+    const ta = taRef.current;
+    const hadKeyboard =
+      (!!ta && document.activeElement === ta) || keyboardInset() > 8;
+    const el = document.activeElement;
+    if (el instanceof HTMLElement) el.blur();
+    void preloadStickers(true);
+    if (hadKeyboard) {
+      // The keyboard is up: let it finish sliding away first, then reveal the
+      // tray. Raising the bar to tray height while the keyboard is still up
+      // stacks the tray area on top of it for a frame — the bar just follows
+      // the inset down like a normal keyboard close instead.
+      waitUntil(() => keyboardInset() <= 8, () => setGifOpen(true), 600);
+    } else {
+      setGifOpen(true);
+    }
+  };
+
+  /**
+   * Close the tray via the sticker toggle: always bring the keyboard back
+   * (the toggle is also the "switch back to typing" key), holding the bar at
+   * tray height until it has fully risen so the input field stays in place.
+   */
+  const closeTray = () => {
+    setGifOpen(false);
+    setClosingTray(true);
+    taRef.current?.focus();
+    if (isCoarse) {
+      // On touch the keyboard physically rises — wait for it before lowering
+      // the bar so nothing dips. On desktop focus restores instantly.
+      waitUntil(() => keyboardInset() > 8, () => setClosingTray(false));
+    } else {
+      setClosingTray(false);
+    }
   };
 
   useEffect(() => {
@@ -318,6 +399,16 @@ export function MessageComposer({
     }
   };
 
+  /**
+   * Send a pack sticker instantly by reference: the pack ships with the server
+   * build, so there's nothing to upload — the server resolves the mediaId and
+   * every participant streams it from the CDN. The tray stays open so several
+   * stickers can be fired off in a row.
+   */
+  const sendPackSticker = (mediaId: string) => {
+    onSend("", { type: "sticker", mediaId });
+  };
+
   const clearPending = () => {
     setPending(null);
     setPendingObj((u) => {
@@ -402,7 +493,7 @@ export function MessageComposer({
       ref={barRef}
       className="fixed z-20 border-t border-base-border bg-base/95 backdrop-blur"
       style={{
-        bottom: `calc(${inset}px + env(safe-area-inset-bottom))`,
+        bottom: `calc(${inset + trayOffset}px + env(safe-area-inset-bottom))`,
         left: "env(safe-area-inset-left)",
         right: "env(safe-area-inset-right)",
       }}
@@ -443,18 +534,15 @@ export function MessageComposer({
 
       <div className="mx-auto flex max-w-2xl items-end gap-2 px-3 py-2.5">
         <button
-          onClick={() => {
-            setGifOpen(false);
-            setEmojiOpen((v) => !v);
-          }}
-          aria-label={emojiOpen ? "Close emoji picker" : "Open emoji picker"}
+          onClick={() => (gifOpen ? closeTray() : openTray())}
+          aria-label={gifOpen ? "Close stickers" : "Open stickers"}
           className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
-            emojiOpen
+            gifOpen
               ? "bg-base-border text-accent"
               : "text-ink-muted hover:bg-base-raised active:bg-base-border"
           }`}
         >
-          <IconEmoji width={22} height={22} />
+          <IconSticker width={22} height={22} />
         </button>
 
         <textarea
@@ -462,6 +550,15 @@ export function MessageComposer({
           rows={1}
           value={text}
           onChange={(e) => onChange(e.target.value)}
+          onFocus={() => {
+            // Tapping the input while the tray is open dismisses it — otherwise
+            // the keyboard and the tray would stack on top of each other.
+            if (gifOpen) {
+              setGifOpen(false);
+              setClosingTray(true);
+              waitUntil(() => keyboardInset() > 8, () => setClosingTray(false));
+            }
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               if (!isCoarse) {
@@ -487,21 +584,6 @@ export function MessageComposer({
           className={sidebarButton}
         >
           <IconImage width={21} height={21} />
-        </button>
-
-        <button
-          onClick={() => {
-            setEmojiOpen(false);
-            setGifOpen((v) => !v);
-          }}
-          aria-label={gifOpen ? "Close sticker picker" : "Open sticker picker"}
-          className={`mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
-            gifOpen
-              ? "bg-base-border text-accent"
-              : "text-ink-muted hover:bg-base-raised active:bg-base-border"
-          }`}
-        >
-          <IconSticker width={21} height={21} />
         </button>
 
         {voiceNotesEnabled && (
@@ -579,29 +661,17 @@ export function MessageComposer({
 
       {!pending && gifOpen && (
         <GifPicker
-          initialMode="sticker"
+          onPickPackSticker={sendPackSticker}
           onPickGif={(f) => beginPending(f)}
           onPickSticker={(f) => void sendSticker(f)}
+          onPickEmoji={insertEmoji}
           onPickStickerFromImage={() => {
             setGifOpen(false);
             setTimeout(() => stickerInputRef.current?.click(), 0);
           }}
           onPickFile={() => gifInputRef.current?.click()}
-          onClose={() => setGifOpen(false)}
+          onClose={closeTray}
         />
-      )}
-
-      {!pending && emojiOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-10"
-            aria-hidden
-            onClick={() => setEmojiOpen(false)}
-          />
-          <div className="absolute inset-x-0 bottom-full z-20 mx-auto max-w-2xl px-2 pb-1">
-            <EmojiPicker onPick={insertEmoji} />
-          </div>
-        </>
       )}
 
       {!pending && rec && (

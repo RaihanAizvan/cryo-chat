@@ -57,6 +57,16 @@ export interface Config {
   cloudinaryApiSecret: string;
   /** Unsigned upload preset the client uses to push files straight to Cloudinary. */
   cloudinaryUploadPreset: string;
+  /** Cloudinary folder hosting the curated sticker pack (metadata cached in-memory). */
+  stickerPackFolder: string;
+  /** How often the sticker pack re-syncs from Cloudinary, in ms. */
+  stickerPackRefreshMs: number;
+  /**
+   * TEST/DEV-ONLY: JSON array of sticker rows that seeds the pack without a
+   * Cloudinary account (normalized like listPackResources output). Not for
+   * production; empty by default.
+   */
+  stickerPackTestJson: string;
   /** Redis connection URL, e.g. redis://:password@host:6379/0. Empty = memory mode. */
   redisUrl: string;
   /** Alternatively, discrete Redis host (used when redisUrl is empty). */
@@ -111,6 +121,9 @@ export const config: Config = {
   cloudinaryApiKey: process.env.CLOUDINARY_API_KEY ?? "",
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
   cloudinaryUploadPreset: process.env.CLOUDINARY_UPLOAD_PRESET ?? "",
+  stickerPackFolder: process.env.STICKER_PACK_FOLDER ?? "cryo/stickers",
+  stickerPackRefreshMs: Number(process.env.STICKER_PACK_REFRESH_MS ?? 5 * 60_000),
+  stickerPackTestJson: process.env.STICKER_PACK_TEST_JSON ?? "",
   redisUrl: process.env.REDIS_URL ?? "",
   redisHost: process.env.REDIS_HOST ?? "",
   redisPort: Number(process.env.REDIS_PORT ?? 6379),

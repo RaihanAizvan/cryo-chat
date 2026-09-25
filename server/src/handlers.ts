@@ -14,6 +14,7 @@ import { getSession, updateName } from "./sessions.js";
 import type { Session } from "./sessions.js";
 import * as rooms from "./rooms.js";
 import * as media from "./media.js";
+import * as pack from "./pack.js";
 import * as audit from "./audit.js";
 import { normalizeMessage, normalizeCaption } from "./validation.js";
 import { normalizeCode } from "./util.js";
@@ -282,30 +283,70 @@ export function attachHandlers(io: Server, socket: Socket): void {
       typeof raw?.clientId === "string" && raw.clientId.length <= 64
         ? raw.clientId
         : undefined;
+    const sessionId = getSession(socket).id;
 
-    // Media messages: the reference must come from this session's own upload.
+    // Media messages: the mediaId must resolve to a real attachment. In-memory
+    // uploads and Cloudinary-backed (remote) uploads are owner-gated — they
+    // must have been uploaded by this session. Sticker-pack stickers are a
+    // shared read-only set anyone can send (the pack ships to every client).
+    // Anything unknown — random, expired, or someone else's upload — is
+    // rejected with the canonical error.
     const mediaId =
       typeof raw?.attachment?.mediaId === "string" ? raw.attachment.mediaId : "";
+    const rejectUnknownMedia = (): void => {
+      sendError(socket, {
+        code: "message_invalid",
+        message: "Unknown media attachment.",
+        clientId,
+      });
+    };
     let attachment: MessageAttachment | undefined;
     if (mediaId) {
       const m = media.getMedia(mediaId);
-      if (!m || m.uploadedBy !== getSession(socket).id) {
-        sendError(socket, {
-          code: "message_invalid",
-          message: "Unknown media attachment.",
-          clientId,
-        });
-        return;
+      if (m) {
+        if (m.uploadedBy !== sessionId) {
+          rejectUnknownMedia();
+          return;
+        }
+        attachment = {
+          type: m.kind,
+          mediaId: m.id,
+          viewOnce: m.viewOnce,
+          width: m.width,
+          height: m.height,
+          name: m.name,
+          duration: m.duration,
+        };
+      } else {
+        const r = media.getRemoteFor(mediaId, sessionId);
+        if (r) {
+          if (r.uploadedBy !== sessionId) {
+            rejectUnknownMedia();
+            return;
+          }
+          attachment = {
+            type: r.kind,
+            mediaId: r.id,
+            viewOnce: r.viewOnce,
+            width: r.width,
+            height: r.height,
+            name: r.name,
+          };
+        } else {
+          const p = pack.getPackSticker(mediaId);
+          if (!p) {
+            rejectUnknownMedia();
+            return;
+          }
+          attachment = {
+            type: "sticker",
+            mediaId: p.id,
+            width: p.width,
+            height: p.height,
+            name: p.name,
+          };
+        }
       }
-      attachment = {
-        type: m.kind,
-        mediaId: m.id,
-        viewOnce: m.viewOnce,
-        width: m.width,
-        height: m.height,
-        name: m.name,
-        duration: m.duration,
-      };
     }
 
     const text =

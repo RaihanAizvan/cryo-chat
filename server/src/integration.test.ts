@@ -38,10 +38,16 @@ interface ServerHandle {
   stop: () => Promise<void>;
 }
 
-async function bootServer(): Promise<ServerHandle> {
+async function bootServer(extraEnv: Record<string, string> = {}): Promise<ServerHandle> {
   const port = await freePort();
   const child = fork(distPath, [], {
-    env: { ...process.env, PORT: String(port), ADMIN_KEY, MESSAGE_CAP: "50" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      ADMIN_KEY,
+      MESSAGE_CAP: "50",
+      ...extraEnv,
+    },
     silent: true,
   });
   // Wait for the listen log line so clients never race the bind.
@@ -242,4 +248,107 @@ runIntegration("admin REST API on the production bundle", () => {
     expect(ok.status).toBe(200);
     expect(ok.body.settings!.maxRoomSize).toBe(200);
   });
+});
+
+runIntegration("sticker pack on the production bundle", () => {
+  let packHandle: ServerHandle;
+  let packPort: number;
+
+  beforeAll(async () => {
+    // STICKER_PACK_TEST_JSON seeds the pack without a Cloudinary account. One
+    // row is deliberately invalid (format "set_up") and must be filtered.
+    packHandle = await bootServer({
+      STICKER_PACK_TEST_JSON: JSON.stringify([
+        { publicId: "cryo/stickers/party", format: "webp", width: 256, height: 256 },
+        { publicId: "cryo/stickers/zzz", format: "set_up", width: 1, height: 1 },
+      ]),
+    });
+    packPort = packHandle.port;
+  }, 30_000);
+
+  afterAll(async () => {
+    await packHandle.stop();
+  }, 10_000);
+
+  it("lists the pack, filtering invalid rows", async () => {
+    const res = await fetch(`http://127.0.0.1:${packPort}/api/stickers`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      stickers?: Array<{ id: string; url: string; width: number; height: number; name: string }>;
+    };
+    expect(body.stickers).toHaveLength(1);
+    const [s] = body.stickers!;
+    expect(s.id).toBe("cryo/stickers/party");
+    expect(s.url).toContain("cryo/stickers/party");
+    expect(s.width).toBe(256);
+    expect(s.height).toBe(256);
+    expect(s.name).toBe("party");
+  });
+
+  it("absent pack server reports 404 without a backend", async () => {
+    // Neutralize any Cloudinary creds the environment may inject (e.g. a root
+    // .env) so packEnabled() is false and the route 404s.
+    const noPack = await bootServer({
+      CLOUDINARY_CLOUD_NAME: "",
+      CLOUDINARY_API_KEY: "",
+      CLOUDINARY_API_SECRET: "",
+    });
+    try {
+      const res = await fetch(`http://127.0.0.1:${noPack.port}/api/stickers`);
+      expect(res.status).toBe(404);
+    } finally {
+      await noPack.stop();
+    }
+  }, 20_000);
+
+  it("redirects pack media to the CDN url (302)", async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${packPort}/api/media/${encodeURIComponent("cryo/stickers/party")}?session=viewer`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("cryo/stickers/party");
+  });
+
+  it("sends a pack sticker by reference to every participant", async () => {
+    const aliceC = makeClient(packPort);
+    const bobC = makeClient(packPort);
+    const alice = await aliceC.connected;
+    const bob = await bobC.connected;
+    await aliceC.init;
+    await bobC.init;
+
+    const aliceRoom = once<ServerToClientEventMap["room:joined"]>(alice, "room:joined");
+    alice.emit("room:create", {});
+    const room = (await aliceRoom).room;
+
+    const bobRoom = once<ServerToClientEventMap["room:joined"]>(bob, "room:joined");
+    bob.emit("room:join", { code: room.code });
+    await bobRoom;
+
+    const bobMsg = once<ServerToClientEventMap["message:new"]>(bob, "message:new");
+    alice.emit("message:send", {
+      roomId: room.id,
+      clientId: "pack-1",
+      attachment: { mediaId: "cryo/stickers/party" },
+    });
+    const recv = await bobMsg;
+    expect(recv.message.attachment?.type).toBe("sticker");
+    expect(recv.message.attachment?.mediaId).toBe("cryo/stickers/party");
+    expect(recv.message.attachment?.name).toBe("party");
+    expect(recv.message.attachment?.width).toBe(256);
+
+    // An unknown sticker id is rejected like any bad media — the error goes
+    // to the sender.
+    const errP = once<ErrorPayload>(alice, "error");
+    alice.emit("message:send", {
+      roomId: room.id,
+      clientId: "pack-2",
+      attachment: { mediaId: "cryo/stickers/nope" },
+    });
+    const err = await errP;
+    expect(err.code).toBe("message_invalid");
+    alice.disconnect();
+    bob.disconnect();
+  }, 30_000);
 });

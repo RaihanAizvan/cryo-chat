@@ -21,6 +21,20 @@ export function isCloudinaryConfigured(): boolean {
   );
 }
 
+/**
+ * True when Cloudinary admin credentials exist. The sticker pack only lists a
+ * folder and streams CDN URLs, so it never needs the upload preset or spends
+ * credits — gating on name+key+secret keeps the pack usable even when uploads
+ * are gated off.
+ */
+export function isPackConfigured(): boolean {
+  return Boolean(
+    config.cloudinaryCloudName &&
+      config.cloudinaryApiKey &&
+      config.cloudinaryApiSecret,
+  );
+}
+
 /** Public identifiers handed to the client so it can upload directly. Once the
  *  free-tier credit budget is nearly exhausted, null is returned so clients
  *  revert to the in-memory path instead of hard-failing on uploads. */
@@ -113,6 +127,57 @@ export async function fetchRemoteDetails(
 /** Deterministic secure CDN URL (avoids re-signing for plain public uploads). */
 export function remoteSecureUrl(publicId: string): string {
   return `https://res.cloudinary.com/${config.cloudinaryCloudName}/image/upload/${publicId}`;
+}
+
+/**
+ * List image assets in a folder (Search API). Returns metadata only — bytes
+ * stay on the CDN and are streamed on demand. Paginates until `maxResults` is
+ * reached. Used once at boot and on the refresh interval to seed/prune the
+ * in-memory sticker pack.
+ *
+ * This targets `asset_folder` (Search) rather than the classic `prefix`
+ * listing: modern accounts use dynamic folders, where the folder is a metadata
+ * field on a flat public_id and the prefix-based `resources` endpoint returns
+ * nothing. `asset_folder` matching works in both modes. Requires read/Admin
+ * permission on the API key — an ML-user-only key matches the folder in search
+ * but returns no asset bodies.
+ */
+export async function listPackResources(
+  folder: string,
+  maxResults: number,
+): Promise<{ publicId: string; format: string; width: number; height: number }[]> {
+  if (folder?.includes('"') || folder?.includes("\\")) return [];
+  ensureConfigured();
+  const rows: { publicId: string; format: string; width: number; height: number }[] = [];
+  let nextCursor: string | null = null;
+  do {
+    const query = cloudinary.search
+      .expression(`asset_folder:"${folder}"`)
+      .max_results(Math.min(maxResults, 500));
+    if (nextCursor) query.next_cursor(nextCursor);
+    const res = (await query.execute()) as {
+      resources?: Array<{
+        public_id?: unknown;
+        format?: unknown;
+        width?: unknown;
+        height?: unknown;
+      }>;
+      next_cursor?: unknown;
+    };
+    for (const r of res.resources ?? []) {
+      if (typeof r.public_id !== "string") continue;
+      const format =
+        typeof r.format === "string" ? r.format.toLowerCase() : "";
+      const width = Number(r.width);
+      const height = Number(r.height);
+      rows.push({ publicId: r.public_id, format, width, height });
+    }
+    nextCursor =
+      typeof res.next_cursor === "string" && res.next_cursor
+        ? res.next_cursor
+        : null;
+  } while (nextCursor && rows.length < maxResults);
+  return rows.slice(0, maxResults);
 }
 
 /** Delete a public asset (view-once consumption, expiry sweep). Never throws. */

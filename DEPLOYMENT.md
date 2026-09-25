@@ -47,9 +47,35 @@ Abasthan runs a persistent Node web service, so the whole app fits in one servic
     account is nearly out of credits the server stops offering the preset and
     the client silently falls back to in-memory uploads, so sending never
     hard-fails.
+  - `STICKER_PACK_FOLDER` (default `cryo/stickers`) and
+    `STICKER_PACK_REFRESH_MS` (default `300000`) — optional; enable the
+    curated sticker pack (see below). They only matter when the Cloudinary
+    creds above are set.
 
 The server serves the built frontend from `client/dist` (built by the build
 command) and handles `/socket.io` WebSockets on the same domain — no CORS needed.
+
+## Sticker pack (optional)
+
+Curated stickers live in a dedicated **Cloudinary folder** (`STICKER_PACK_FOLDER`,
+default `cryo/stickers`) so the repository never grows with sticker assets. On
+boot the server lists the folder once and caches only the metadata (public id,
+CDN url, format, dimensions) in memory; it re-lists every
+`STICKER_PACK_REFRESH_MS` so stickers you add in the Cloudinary dashboard show
+up without a restart and deletions prune themselves. Image bytes stay on the
+CDN and stream to viewers through a 302 redirect on fetch — access is instant
+and RAM stays flat.
+
+- **Add a sticker:** upload a PNG/WebP/GIF to the folder in the Cloudinary
+  dashboard (square images look best; the client renders stickers at 96×96).
+- **API key permission:** the pack lists the folder through the Search API
+  (`asset_folder`), which works on modern "dynamic folder" accounts. The key
+  needs read/Admin permission — a Media-Library-User key matches the folder but
+  the API intentionally returns no asset records, so the pack stays empty.
+- **Picker:** the "Pack" tab lists them first, ahead of the optional Giphy
+  tabs. Picking one sends it instantly by reference (no upload, no TTL).
+- **Disabled automatically** when the Cloudinary creds are unset — the tab
+  just disappears, and "Make a sticker"/Giphy keep working.
 
 ## Option 2 — Backend on Abasthan, frontend on Vercel
 
@@ -78,8 +104,8 @@ sticky sessions (even if you later scale to multiple instances).
   - **Health check path:** `/health`
   - **Environment variables:** `GIPHY_API_KEY`, `CLOUDINARY_CLOUD_NAME`,
     `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CLOUDINARY_UPLOAD_PRESET`,
-    `ADMIN_KEY` — copy the values you set on Abasthan so both hosts behave the
-    same. `PORT` is injected by Render automatically.
+    `STICKER_PACK_FOLDER`, `ADMIN_KEY` — copy the values you set on Abasthan
+    so both hosts behave the same. `PORT` is injected by Render automatically.
 
 **Caveats to know:**
 - **Free tier sleeps.** On the free plan Render spins the service down after

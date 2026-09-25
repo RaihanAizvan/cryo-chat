@@ -23,6 +23,7 @@ import {
   remoteSecureUrl,
 } from "./cloudinary.js";
 import { store } from "./store.js";
+import * as pack from "./pack.js";
 
 /** Upload byte budget per IP per window (media blobs are cheap to flood). */
 const UPLOAD_WINDOW_MS = 60_000;
@@ -153,6 +154,15 @@ export function createHttpApp(): express.Express {
     if (r) {
       res.setHeader("Cache-Control", "private, no-store, max-age=0");
       res.redirect(302, r.secureUrl);
+      return;
+    }
+    // Sticker-pack stickers: shared public CDN assets that never expire. The
+    // redirect is cachable briefly; a pruned sticker then falls off within a
+    // refresh window instead of lingering.
+    const p = pack.getPackSticker(req.params.id);
+    if (p) {
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.redirect(302, p.secureUrl);
       return;
     }
     res.status(404).json({ error: "not_found" });
@@ -289,6 +299,26 @@ export function createHttpApp(): express.Express {
     } catch {
       res.status(502).json({ error: "giphy_unreachable" });
     }
+  });
+
+  // Curated sticker pack (Cloudinary folder, metadata cached in memory). The
+  // picker lists these; sending references the pack mediaId directly. 404 when
+  // the pack isn't configured — the client hides the tab. Cheap: a cached
+  // read, so no per-request rate limit is needed.
+  app.get("/api/stickers", (_req, res) => {
+    if (!pack.packEnabled()) {
+      res.status(404).json({ error: "no_pack" });
+      return;
+    }
+    res.json({
+      stickers: pack.listPackStickers().map((s) => ({
+        id: s.id,
+        url: s.secureUrl,
+        width: s.width,
+        height: s.height,
+        name: s.name,
+      })),
+    });
   });
 
   return app;

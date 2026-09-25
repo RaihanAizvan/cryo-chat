@@ -81,9 +81,9 @@ export function MediaMessage({ attachment, sessionId }: Props) {
 
   // Let the natural aspect ratio drive the box; only cap width/height. This
   // makes tall (portrait) and wide images both look right (no odd shrinking).
-  // Stickers stay small and square like WhatsApp.
+  // Stickers stay square like WhatsApp, just a bit larger now.
   const imgStyle: CSSProperties = isSticker
-    ? { width: 96, height: 96, maxWidth: 96, maxHeight: 96 }
+    ? { width: 128, height: 128, maxWidth: 128, maxHeight: 128 }
     : isGif
       ? { maxWidth: "min(52vw, 190px)", maxHeight: 240, width: "auto", height: "auto" }
       : { maxWidth: "min(70vw, 300px)", maxHeight: 360, width: "auto", height: "auto" };

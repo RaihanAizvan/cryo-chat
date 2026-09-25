@@ -5,16 +5,19 @@ interface Props {
   onPick: (emoji: string) => void;
 }
 
-/** Instagram-style emoji sheet: category tabs + grid + recently used row. */
+/**
+ * Instagram-style emoji sheet. Rendered as a pane inside the media tray's
+ * Emoji tab — fills its parent and scrolls its own category grid.
+ */
 export function EmojiPicker({ onPick }: Props) {
   const [catId, setCatId] = useState(EMOJI_CATEGORIES[0].id);
   const recent = getRecentEmojis();
   const active = EMOJI_CATEGORIES.find((c) => c.id === catId) ?? EMOJI_CATEGORIES[0];
 
   return (
-    <div className="flex h-[17rem] flex-col overflow-hidden rounded-t-2xl border border-b-0 border-base-border2 bg-base-raised shadow-2xl">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Category tabs */}
-      <div className="no-scrollbar flex shrink-0 gap-1 overflow-x-auto border-b border-base-border px-2 py-1.5">
+      <div className="no-scrollbar flex shrink-0 gap-1 overflow-x-auto border-b border-base-border px-2 py-1">
         {EMOJI_CATEGORIES.map((c) => (
           <button
             key={c.id}
@@ -42,7 +45,7 @@ export function EmojiPicker({ onPick }: Props) {
             ))}
           </div>
         )}
-        <div className="grid grid-cols-8 gap-0.5">
+        <div className="grid grid-cols-8 gap-0.5 pb-1">
           {active.emojis.map((e) => (
             <EmojiButton key={e} emoji={e} onPick={onPick} />
           ))}
