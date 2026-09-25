@@ -301,6 +301,55 @@ runIntegration("sticker pack on the production bundle", () => {
     }
   }, 20_000);
 
+  it("admin reports the pack and forces a re-sync", async () => {
+    const adminPack = async (path: string, method = "GET") => {
+      const res = await fetch(`http://127.0.0.1:${packPort}/admin${path}`, {
+        method,
+        headers: { "x-admin-key": ADMIN_KEY },
+      });
+      return { status: res.status, body: (await res.json()) as { enabled?: boolean; count?: number | null } };
+    };
+
+    const info = await adminPack("/stickers");
+    expect(info.status).toBe(200);
+    expect(info.body.enabled).toBe(true);
+    expect(info.body.count).toBe(1);
+
+    const synced = await adminPack("/stickers/sync", "POST");
+    expect(synced.status).toBe(200);
+    expect(synced.body.enabled).toBe(true);
+    expect(synced.body.count).toBe(1);
+
+    const denied = await fetch(`http://127.0.0.1:${packPort}/admin/stickers`, {
+      headers: { "x-admin-key": "wrong-key" },
+    });
+    expect(denied.status).toBe(401);
+
+    // Without a backend the admin reports it disabled and refuses to sync.
+    const noPack = await bootServer({
+      CLOUDINARY_CLOUD_NAME: "",
+      CLOUDINARY_API_KEY: "",
+      CLOUDINARY_API_SECRET: "",
+    });
+    try {
+      const off = await fetch(`http://127.0.0.1:${noPack.port}/admin/stickers`, {
+        headers: { "x-admin-key": ADMIN_KEY },
+      });
+      expect(off.status).toBe(200);
+      const offBody = (await off.json()) as { enabled: boolean; count: number };
+      expect(offBody.enabled).toBe(false);
+      expect(offBody.count).toBe(0);
+
+      const syncOff = await fetch(`http://127.0.0.1:${noPack.port}/admin/stickers/sync`, {
+        method: "POST",
+        headers: { "x-admin-key": ADMIN_KEY },
+      });
+      expect(syncOff.status).toBe(404);
+    } finally {
+      await noPack.stop();
+    }
+  }, 30_000);
+
   it("redirects pack media to the CDN url (302)", async () => {
     const res = await fetch(
       `http://127.0.0.1:${packPort}/api/media/${encodeURIComponent("cryo/stickers/party")}?session=viewer`,

@@ -43,6 +43,27 @@ export function AdminSettings() {
     POLL,
   );
 
+  const p = usePoll<{ enabled: boolean; count: number | null }>(
+    useCallback(() => adminApi.stickers(), []),
+    POLL,
+  );
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const syncPack = async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      await adminApi.syncStickers();
+      p.reload();
+      setSyncMsg({ ok: true, text: "Pack re-synced from Cloudinary." });
+    } catch (e) {
+      setSyncMsg({ ok: false, text: e instanceof Error ? e.message : "Sync failed." });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const [form, setForm] = useState<Partial<AdminSettings> | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<number | null>(null);
@@ -213,6 +234,72 @@ export function AdminSettings() {
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
               )}
               Save changes
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Sticker pack"
+          subtitle="Curated stickers from the Cloudinary folder, cached in memory"
+          right={
+            p.loading ? (
+              <Badge tone="amber">…</Badge>
+            ) : p.data ? (
+              <Badge tone={p.data.enabled ? "green" : "amber"}>
+                {p.data.enabled
+                  ? `${p.data.count ?? 0} sticker${p.data.count === 1 ? "" : "s"}`
+                  : "disabled"}
+              </Badge>
+            ) : (
+              <Badge tone="amber">unavailable</Badge>
+            )
+          }
+        />
+        <div className="p-4">
+          <p className="text-sm text-ink-muted">
+            The app lists the pack's metadata from Cloudinary at boot and on a
+            refresh interval, so dashboard changes normally take up to that
+            interval to appear. <span className="text-ink">Sync now</span> pulls
+            newly added or removed stickers immediately — no restart. Listing
+            only uses the read credential, so this never spends upload credits.
+          </p>
+          {p.error && (
+            <p className="mt-4 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+              {p.error}
+            </p>
+          )}
+          {syncMsg && (
+            <p
+              className={`mt-4 rounded-lg border px-3 py-2 text-xs ${
+                syncMsg.ok
+                  ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+                  : "border-rose-500/25 bg-rose-500/10 text-rose-300"
+              }`}
+              aria-live="polite"
+            >
+              {syncMsg.text}
+            </p>
+          )}
+          <div className="mt-5 flex items-center justify-end gap-2 border-t border-base-border pt-4">
+            <button
+              onClick={p.reload}
+              disabled={syncing}
+              className="flex items-center gap-1.5 rounded-xl border border-base-border2 px-3 py-2 text-sm text-ink-muted transition-colors hover:text-ink disabled:opacity-40"
+            >
+              <IconRefresh width={13} height={13} />
+              Refresh status
+            </button>
+            <button
+              onClick={() => void syncPack()}
+              disabled={syncing || !p.data?.enabled}
+              className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white transition-transform active:scale-[0.99] disabled:opacity-40"
+            >
+              {syncing && (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              )}
+              Sync now
             </button>
           </div>
         </div>

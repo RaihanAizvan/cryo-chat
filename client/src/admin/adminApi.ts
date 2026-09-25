@@ -142,4 +142,9 @@ export const adminApi = {
       method: "PUT",
       body: JSON.stringify(patch),
     }).then((r) => r.settings),
+
+  stickers: () => request<{ enabled: boolean; count: number | null }>("/stickers"),
+
+  syncStickers: () =>
+    request<{ enabled: boolean; count: number | null }>("/stickers/sync", { method: "POST" }),
 };

@@ -26,6 +26,7 @@ import * as audit from "./audit.js";
 import * as bans from "./bans.js";
 import { getSettings, updateSettings } from "./settings.js";
 import { adminRemoveMember, closeRoom } from "./handlers.js";
+import * as pack from "./pack.js";
 
 const bootAt = Date.now();
 
@@ -382,6 +383,31 @@ export function mountAdminRoutes(app: Express, io: Server): void {
       io.emit("settings:update", { voiceNotesEnabled: next.voiceNotesEnabled });
     }
     res.json({ settings: settingsView() });
+  });
+
+  // -- sticker pack --------------------------------------------------------
+  router.get("/stickers", (_req, res) => {
+    res.json({ enabled: pack.packEnabled(), count: pack.packSize() });
+  });
+
+  // Force a re-sync of the in-memory sticker pack from Cloudinary (or the
+  // test seam) so stickers added in the dashboard appear immediately instead
+  // of on the next interval tick. Reads never spend credits, so this is free.
+  router.post("/stickers/sync", async (_req, res) => {
+    if (!pack.packEnabled()) {
+      res.status(404).json({
+        error: "no_pack",
+        message: "No sticker pack backend is configured (Cloudinary or STICKER_PACK_TEST_JSON).",
+      });
+      return;
+    }
+    const count = await pack.refreshStickerPack();
+    audit.record({
+      kind: "settings:update",
+      message: `Sticker pack re-synced from the backend (${count} stickers)`,
+      actor: "admin",
+    });
+    res.json({ enabled: true, count });
   });
 
   app.use("/admin", adminAuth, router);
