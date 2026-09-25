@@ -387,10 +387,10 @@ export function MessageComposer({
   /**
    * Send a pack sticker instantly by reference: the pack ships with the server
    * build, so there's nothing to upload — the server resolves the mediaId and
-   * every participant streams it from the CDN.
+   * every participant streams it from the CDN. The tray stays open so several
+   * stickers can be fired off in a row.
    */
   const sendPackSticker = (mediaId: string) => {
-    setGifOpen(false);
     onSend("", { type: "sticker", mediaId });
   };
 
