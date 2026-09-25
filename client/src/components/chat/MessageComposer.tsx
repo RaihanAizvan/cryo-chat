@@ -369,13 +369,17 @@ export function MessageComposer({
   const sendSticker = async (file: File) => {
     try {
       const up = await uploadAny(file, { name: "sticker", sticker: true });
-      onSend("", {
-        type: "sticker",
-        mediaId: up.mediaId,
-        width: up.width,
-        height: up.height,
-        name: "Sticker",
-      });
+      onSend(
+        "",
+        {
+          type: "sticker",
+          mediaId: up.mediaId,
+          width: up.width,
+          height: up.height,
+          name: "Sticker",
+        },
+        replyTarget ?? undefined,
+      );
     } catch (err) {
       showNotice(
         err instanceof Error && err.message ? err.message : "Couldn't send that sticker.",
@@ -406,7 +410,7 @@ export function MessageComposer({
    * stickers can be fired off in a row.
    */
   const sendPackSticker = (mediaId: string) => {
-    onSend("", { type: "sticker", mediaId });
+    onSend("", { type: "sticker", mediaId }, replyTarget ?? undefined);
   };
 
   const clearPending = () => {
