@@ -11,6 +11,31 @@ import { EmojiPicker } from "./EmojiPicker";
 import { peekStickers, preloadStickers, type PackSticker } from "../../lib/api";
 import { MEDIA_TRAY_HEIGHT } from "../../lib/mediaTray";
 
+/** Recently-used pack stickers, most-recent-first (committed on tray close). */
+const RECENT_PACK_KEY = "cryo:recentPackStickers";
+const RECENT_PACK_CAP = 12;
+
+function readRecentIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_PACK_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr)
+      ? arr.filter((x): x is string => typeof x === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecentIds(ids: string[]) {
+  try {
+    window.localStorage.setItem(RECENT_PACK_KEY, JSON.stringify(ids));
+  } catch {
+    // private mode etc. — recents just reset next time
+  }
+}
+
 interface Props {
   /** Pack sticker picked: send it instantly by reference (no upload). */
   onPickPackSticker: (mediaId: string) => void;
@@ -128,6 +153,20 @@ export function GifPicker({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  // Recents are snapshotted when the tray opens and only committed when it
+  // closes — so cells never shuffle mid-session while you tap stickers.
+  const [recentIds] = useState<string[]>(() => readRecentIds());
+  const sessionPicksRef = useRef<string[]>([]);
+  useEffect(
+    () => () => {
+      const picks = sessionPicksRef.current;
+      if (picks.length === 0) return;
+      const merged = [...picks, ...readRecentIds().filter((id) => !picks.includes(id))];
+      writeRecentIds(merged.slice(0, RECENT_PACK_CAP));
+    },
+    [],
+  );
 
   // Tap anywhere outside the tray panel (the chat above, the composer bar)
   // dismisses it — WhatsApp behaviour.
@@ -271,6 +310,27 @@ export function GifPicker({
 
   const packTabVisible = pack !== undefined && pack !== null;
 
+  // Recents-first pack order for this session — snapshotted at open, stable
+  // while the tray stays open (picks only move to the front on the NEXT open).
+  const recentCells: PackSticker[] = [];
+  const restCells: PackSticker[] = [];
+  if (pack) {
+    const seen = new Set<string>();
+    for (const id of recentIds) {
+      const s = pack.find((x) => x.id === id);
+      if (s && !seen.has(s.id)) {
+        recentCells.push(s);
+        seen.add(s.id);
+      }
+    }
+    for (const s of pack) if (!seen.has(s.id)) restCells.push(s);
+  }
+
+  const choosePackSticker = (id: string) => {
+    if (!sessionPicksRef.current.includes(id)) sessionPicksRef.current.push(id);
+    onPickPackSticker(id);
+  };
+
   // Bottom dock: the tray's tab bar, centered. The pack tab is the project's
   // Cloudinary pack; GIF/Sticker (Giphy) appear while search is available;
   // Emoji always.
@@ -338,25 +398,55 @@ export function GifPicker({
                 ) : pack !== null ? (
                   <>
                     {pack.length > 0 ? (
-                      <div className="grid grid-cols-4 gap-1.5 pt-2 pr-0.5">
-                        {pack.map((s) => (
-                          <button
-                            key={s.id}
-                            type="button"
-                            onClick={() => onPickPackSticker(s.id)}
-                            aria-label={s.name ?? "Choose sticker"}
-                            className="group relative aspect-square overflow-hidden rounded-lg bg-base-border transition-colors hover:bg-base-border2"
-                          >
-                            <img
-                              src={s.url}
-                              alt={s.name ?? ""}
-                              loading="lazy"
-                              draggable={false}
-                              className="h-full w-full object-contain transition-transform duration-150 group-hover:scale-105"
-                            />
-                          </button>
-                        ))}
-                      </div>
+                      <>
+                        {recentCells.length > 0 && (
+                          <>
+                            <p className="px-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+                              Recently used
+                            </p>
+                            <div className="grid grid-cols-4 gap-1.5 pt-1 pr-0.5">
+                              {recentCells.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => choosePackSticker(s.id)}
+                                  aria-label={s.name ?? "Choose sticker"}
+                                  className="group relative aspect-square overflow-hidden rounded-lg bg-base-border transition-colors hover:bg-base-border2"
+                                >
+                                  <img
+                                    src={s.url}
+                                    alt={s.name ?? ""}
+                                    loading="lazy"
+                                    draggable={false}
+                                    className="h-full w-full object-contain transition-transform duration-150 group-hover:scale-105"
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                        {restCells.length > 0 && (
+                          <div className="grid grid-cols-4 gap-1.5 pt-2 pr-0.5">
+                            {restCells.map((s) => (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => choosePackSticker(s.id)}
+                                aria-label={s.name ?? "Choose sticker"}
+                                className="group relative aspect-square overflow-hidden rounded-lg bg-base-border transition-colors hover:bg-base-border2"
+                              >
+                                <img
+                                  src={s.url}
+                                  alt={s.name ?? ""}
+                                  loading="lazy"
+                                  draggable={false}
+                                  className="h-full w-full object-contain transition-transform duration-150 group-hover:scale-105"
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <p className="py-6 text-center text-xs leading-relaxed text-ink-faint">
                         No stickers in the pack yet. Add images under the{" "}
