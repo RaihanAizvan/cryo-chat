@@ -73,6 +73,11 @@ export function listPackStickers(): PackSticker[] {
   return [...pack.values()];
 }
 
+/** Current pack size (0 when the pack is empty or disabled). */
+export function packSize(): number {
+  return pack.size;
+}
+
 /** TEST-ONLY: clear the cache so unit tests start from a clean slate. */
 export function resetPackForTest(): void {
   pack.clear();
