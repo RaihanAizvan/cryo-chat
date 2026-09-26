@@ -14,6 +14,9 @@ services:
   - type: web
     name: cryo-chat
     runtime: node
+    # Monorepo: server + client + shared live at the repo root. Do NOT point
+    # this at a "src" or "server" folder — those are inside client/server.
+    rootDir: .
     region: oregon
     plan: starter
     buildCommand: npm install && npm run build

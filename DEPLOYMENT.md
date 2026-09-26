@@ -96,9 +96,14 @@ sticky sessions (even if you later scale to multiple instances).
 **Deploy (`render.yaml` in the repo root):**
 - **Blueprint (recommended):** dashboard → New → Blueprint → connect this repo.
   Fill in the prompted secrets (same values you use on Abasthan), click Apply.
-  The `render.yaml` sets the build/start commands, health check, Node version,
-  and env vars automatically.
+  The `render.yaml` sets the root directory, build/start commands, health check,
+  Node version, and env vars automatically.
 - **Manual:** New → Web Service → this repo, then:
+  - **Root directory:** `.` (repo root — this is a monorepo: `client/`,
+    `server/`, `shared/` live at the root, so there is **no** root-level `src`
+    folder and **no** `server` root either. If Render fails with
+    `Root directory "src" does not exist`, the Root Directory field is set to
+    `src` — change it to `.` and redeploy.)
   - **Build command:** `npm install && npm run build`
   - **Start command:** `npm start`
   - **Health check path:** `/health`
@@ -106,6 +111,12 @@ sticky sessions (even if you later scale to multiple instances).
     `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CLOUDINARY_UPLOAD_PRESET`,
     `STICKER_PACK_FOLDER`, `ADMIN_KEY` — copy the values you set on Abasthan
     so both hosts behave the same. `PORT` is injected by Render automatically.
+
+**Deploying a fork?** If you forked the repo before `render.yaml` was added, the
+fork has no blueprint — Render will fall back to a manual service. Sync the fork
+on GitHub first (fork page → "Sync fork" → "Update branch") so it includes
+`render.yaml` and the latest code, then re-run the Blueprint. A stale fork also
+deploys an outdated snapshot, so syncing fixes both problems.
 
 **Caveats to know:**
 - **Free tier sleeps.** On the free plan Render spins the service down after
