@@ -346,6 +346,9 @@ class RedisStore implements Store {
           name: h.name,
           color: Number(h.color ?? 0),
           createdAt: Number(h.createdAt ?? 0),
+          // Rows written before activity tracking existed fall back to their
+          // creation time, so they expire on schedule instead of never.
+          lastSeenAt: Number(h.lastSeenAt ?? h.createdAt ?? 0),
         });
       }
     } while (cursor !== "0");
@@ -354,12 +357,16 @@ class RedisStore implements Store {
 
   async saveSession(s: Session): Promise<void> {
     const ttl = 60 * 60 * 24 * 7; // 7 days, matches IDENTITY_TTL_MS
+    // The TTL is (re)written on every save, so a regularly-visiting user keeps
+    // their identity indefinitely instead of silently expiring after 7 days
+    // and coming back as a brand new person.
     await this.cmd
       .multi()
       .hset(this.sk(s.id), {
         name: s.name,
         color: String(s.color),
         createdAt: String(s.createdAt),
+        lastSeenAt: String(s.lastSeenAt ?? s.createdAt),
       })
       .expire(this.sk(s.id), ttl)
       .exec();

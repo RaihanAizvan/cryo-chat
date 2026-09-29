@@ -8,6 +8,8 @@ import {
   identityById,
   allBindings,
   deleteIdentity,
+  pruneIdentities,
+  IDENTITY_MAX,
 } from "./sessions";
 import { ban, unban } from "./bans";
 
@@ -62,6 +64,61 @@ describe("getSession", () => {
     } finally {
       unban(created.id);
     }
+  });
+
+  it("stamps lastSeenAt and refreshes it on resume", () => {
+    const sockA = fakeSocket("s1");
+    const created = getSession(sockA);
+    expect(created.lastSeenAt).toBeGreaterThanOrEqual(created.createdAt);
+    // Simulate a long-ago last sighting, then reconnect with the same id.
+    const staleSeen = Date.now() - 1000 * 60 * 60;
+    created.lastSeenAt = staleSeen;
+    destroy(sockA);
+    const resumed = getSession(fakeSocket("s2"), created.id);
+    expect(resumed.lastSeenAt).toBeGreaterThan(staleSeen);
+  });
+});
+
+describe("pruneIdentities", () => {
+  const DAY_MS = 1000 * 60 * 60 * 24;
+
+  it("drops identities that have not been seen for over the TTL", () => {
+    const stale = getSession(fakeSocket("s1"));
+    const fresh = getSession(fakeSocket("s2"));
+    stale.lastSeenAt = Date.now() - 8 * DAY_MS;
+
+    expect(pruneIdentities()).toBe(1);
+    expect(identityById(stale.id)).toBeUndefined();
+    expect(identityById(fresh.id)).toBe(fresh);
+  });
+
+  it("treats a missing lastSeenAt as createdAt", () => {
+    const legacy = getSession(fakeSocket("s1"));
+    // Simulate a row written before activity tracking existed.
+    (legacy as { lastSeenAt?: number }).lastSeenAt = undefined;
+    legacy.createdAt = Date.now() - 8 * DAY_MS;
+    pruneIdentities();
+    expect(identityById(legacy.id)).toBeUndefined();
+  });
+
+  it("never exceeds the cap and keeps the most recently seen", () => {
+    const ancient = getSession(fakeSocket("s1"));
+    ancient.lastSeenAt = Date.now() - 120_000;
+    // `identities` is module-private, so overflow the cap by minting sessions.
+    // The cap guard inside getSession trims as it goes, so the map must never
+    // grow past IDENTITY_MAX even mid-flood.
+    let newest = "";
+    for (let i = 0; i < IDENTITY_MAX + 10; i++) {
+      const s = getSession(fakeSocket(`filler-${i}`));
+      s.lastSeenAt = Date.now() - 60_000;
+      newest = s.id;
+      expect(allIdentities().length).toBeLessThanOrEqual(IDENTITY_MAX);
+    }
+    pruneIdentities();
+    expect(allIdentities().length).toBe(IDENTITY_MAX);
+    // The least recently seen identity is evicted; the newest is kept.
+    expect(identityById(ancient.id)).toBeUndefined();
+    expect(identityById(newest)).toBeDefined();
   });
 });
 

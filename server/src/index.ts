@@ -10,7 +10,7 @@ import { config, redisConfigured } from "./config.js";
 import { createHttpApp, attachClientStatic } from "./http.js";
 import { socketIoCors } from "./cors.js";
 import { attachHandlers, attachClusterModeration, startSweeper } from "./handlers.js";
-import { destroy, loadFromStore as loadSessions } from "./sessions.js";
+import { destroy, loadFromStore as loadSessions, startSessionSweeper } from "./sessions.js";
 import { loadFromStore as loadBans } from "./bans.js";
 import { getSettings, loadFromStore as loadSettings } from "./settings.js";
 import { mountAdminRoutes } from "./admin.js";
@@ -77,6 +77,9 @@ io.on("connection", (socket) => {
 });
 
 startSweeper(io);
+// Reap session identities that have gone quiet (they otherwise accumulate
+// forever, since a disconnect deliberately keeps the identity resumable).
+startSessionSweeper();
 // Route cluster-wide moderation events (admin kicks) to the socket layer.
 attachClusterModeration(io);
 
