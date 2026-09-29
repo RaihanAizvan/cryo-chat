@@ -310,6 +310,25 @@ runIntegration("sticker pack on the production bundle", () => {
     expect(res.headers.get("location")).toContain("cryo/stickers/party");
   });
 
+  it("serves pack media without a session (a reply preview has no viewer yet)", async () => {
+    // Pack stickers are public CDN assets, so the session gate must not sit in
+    // front of them: a reply quote renders one from a bare id.
+    const res = await fetch(
+      `http://127.0.0.1:${packPort}/api/media/${encodeURIComponent("cryo/stickers/party")}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("cryo/stickers/party");
+  });
+
+  it("still refuses a private upload without a session", async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${packPort}/api/media/some-upload-id`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("sends a pack sticker by reference to every participant", async () => {
     const aliceC = makeClient(packPort);
     const bobC = makeClient(packPort);

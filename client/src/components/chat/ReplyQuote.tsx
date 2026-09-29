@@ -13,13 +13,18 @@ interface Props {
   reply: MessageReply;
   /** Render with the sender's bubble palette (light text on accent). */
   mine: boolean;
+  /** Viewer's session, so a quoted upload resolves the same way the bubble does. */
+  sessionId?: string;
   /** Called with the quoted message id when the block is tapped. */
   onTap?: (messageId: string) => void;
 }
 
 /** WhatsApp-style quote block shown above the bubble of a replying message. */
-export function ReplyQuote({ reply, mine, onTap }: Props) {
+export function ReplyQuote({ reply, mine, sessionId, onTap }: Props) {
   const hasThumb = Boolean(reply.attachment?.mediaId) && !reply.viewOnce && reply.attachment?.type !== "voice";
+  // Stickers are cut-out images: cropping them to a square loses the sticker,
+  // so they are letterboxed on a transparent chip instead.
+  const sticker = reply.attachment?.type === "sticker";
   const label = reply.viewOnce
     ? "One-time media"
     : reply.attachment
@@ -51,11 +56,13 @@ export function ReplyQuote({ reply, mine, onTap }: Props) {
         <span className={`mt-0.5 flex min-w-0 items-center gap-1.5 ${mine ? "text-white/70" : "text-ink-muted"}`}>
           {hasThumb && (
             <img
-              src={mediaUrl(reply.attachment!.mediaId!, "")}
+              src={mediaUrl(reply.attachment!.mediaId!, sessionId ?? "")}
               alt=""
               loading="lazy"
               draggable={false}
-              className="h-6 w-6 shrink-0 rounded border border-black/10 object-cover"
+              className={`h-6 w-6 shrink-0 rounded ${
+                sticker ? "object-contain" : "border border-black/10 object-cover"
+              }`}
             />
           )}
           {reply.viewOnce && (

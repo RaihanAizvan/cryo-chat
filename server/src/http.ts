@@ -137,6 +137,17 @@ export function createHttpApp(): express.Express {
   // Media bytes. View-once uploads disappear for everyone once opened. Remote
   // (Cloudinary) records redirect to the CDN URL instead of streaming bytes.
   app.get("/api/media/:id", (req, res) => {
+    // Sticker-pack stickers: shared public CDN assets that never expire and
+    // carry nothing private, so they resolve without a session — a reply quote
+    // that renders one must not depend on a viewer's identity. The redirect is
+    // cachable briefly; a pruned sticker then falls off within a refresh
+    // window instead of lingering.
+    const p = pack.getPackSticker(req.params.id);
+    if (p) {
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.redirect(302, p.secureUrl);
+      return;
+    }
     const sessionId =
       typeof req.query.session === "string" ? req.query.session : "";
     if (!sessionId) {
@@ -154,15 +165,6 @@ export function createHttpApp(): express.Express {
     if (r) {
       res.setHeader("Cache-Control", "private, no-store, max-age=0");
       res.redirect(302, r.secureUrl);
-      return;
-    }
-    // Sticker-pack stickers: shared public CDN assets that never expire. The
-    // redirect is cachable briefly; a pruned sticker then falls off within a
-    // refresh window instead of lingering.
-    const p = pack.getPackSticker(req.params.id);
-    if (p) {
-      res.setHeader("Cache-Control", "public, max-age=60");
-      res.redirect(302, p.secureUrl);
       return;
     }
     res.status(404).json({ error: "not_found" });
