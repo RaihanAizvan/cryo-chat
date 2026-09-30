@@ -13,6 +13,7 @@ import type {
   AdminSettingsPatch,
   AdminStats,
   AdminUser,
+  ReservedRoomAccess,
 } from "@cryo/shared";
 
 const KEY_STORE = "cryo_admin_key";
@@ -142,4 +143,27 @@ export const adminApi = {
       method: "PUT",
       body: JSON.stringify(patch),
     }).then((r) => r.settings),
+
+  /** Access state of the reserved room (never includes the password). */
+  reservedRoom: () =>
+    request<{ reserved: ReservedRoomAccess }>("/reserved-room").then((r) => r.reserved),
+
+  /** Set or change the reserved-room password. Signs out every device. */
+  setReservedRoomPassword: (password: string) =>
+    request<{ reserved: ReservedRoomAccess }>("/reserved-room/password", {
+      method: "PUT",
+      body: JSON.stringify({ password }),
+    }).then((r) => r.reserved),
+
+  /** Remove the password: the reserved room becomes open to anyone. */
+  clearReservedRoomPassword: () =>
+    request<{ reserved: ReservedRoomAccess }>("/reserved-room/password", {
+      method: "DELETE",
+    }).then((r) => r.reserved),
+
+  /** Invalidate saved access without changing the password. */
+  revokeReservedRoomAccess: () =>
+    request<{ reserved: ReservedRoomAccess }>("/reserved-room/revoke-access", {
+      method: "POST",
+    }).then((r) => r.reserved),
 };

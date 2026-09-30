@@ -23,12 +23,8 @@
  * rotating the password.
  */
 
-import {
-  createHmac,
-  randomBytes,
-  scryptSync,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import type { ReservedRoomAccess } from "@cryo/shared";
 import {
   getSettings,
   reservedRoomLocked,
@@ -203,11 +199,7 @@ export function isReservedRoomLocked(): boolean {
 }
 
 /** Admin-facing summary. Contains no secret material. */
-export function reservedRoomAccessState(): {
-  locked: boolean;
-  enabled: boolean;
-  code: string;
-} {
+export function reservedRoomAccessState(): ReservedRoomAccess {
   const s = getSettings();
   return {
     locked: s.reservedRoomPassword !== "",

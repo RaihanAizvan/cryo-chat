@@ -24,7 +24,15 @@ import * as media from "./media.js";
 import * as sessions from "./sessions.js";
 import * as audit from "./audit.js";
 import * as bans from "./bans.js";
-import { getSettings, updateSettings } from "./settings.js";
+import {
+  clearReservedRoomPassword,
+  getSettings,
+  reservedRoomLocked,
+  revokeReservedRoomAccess,
+  setReservedRoomPassword,
+  updateSettings,
+} from "./settings.js";
+import { reservedRoomAccessState } from "./reserved.js";
 import { adminRemoveMember, closeRoom } from "./handlers.js";
 
 const bootAt = Date.now();
@@ -354,6 +362,63 @@ export function mountAdminRoutes(app: Express, io: Server): void {
       splits: audit.splitsTotals(),
       topRooms: audit.topRooms(10),
     });
+  });
+
+  // -- reserved room access -------------------------------------------------
+  // Kept off the generic settings patch on purpose: the password must not be
+  // able to ride along into the audit detail blob or the settings broadcast
+  // that every instance (and the admin UI) receives.
+  router.get("/reserved-room", (_req, res) => {
+    res.json({ reserved: reservedRoomAccessState() });
+  });
+
+  router.put("/reserved-room/password", (req, res) => {
+    const password = (req.body as { password?: unknown } | undefined)?.password;
+    if (typeof password !== "string") {
+      res.status(400).json({ error: "password_required" });
+      return;
+    }
+    const result = setReservedRoomPassword(password);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    audit.record({
+      kind: "reserved:password:set",
+      // The password is deliberately absent from the message and the detail.
+      message: `Reserved room password updated — everyone must re-enter it`,
+      actor: "admin",
+      detail: JSON.stringify({ length: password.length }),
+    });
+    res.json({ reserved: reservedRoomAccessState() });
+  });
+
+  router.delete("/reserved-room/password", (_req, res) => {
+    if (!reservedRoomLocked()) {
+      res.status(409).json({ error: "no_password" });
+      return;
+    }
+    clearReservedRoomPassword();
+    audit.record({
+      kind: "reserved:password:removed",
+      message: "Reserved room password removed — the room is open again",
+      actor: "admin",
+    });
+    res.json({ reserved: reservedRoomAccessState() });
+  });
+
+  /**
+   * Sign every unlocked device out without rotating the password. The next
+   * join from any device asks for the password again.
+   */
+  router.post("/reserved-room/revoke-access", (_req, res) => {
+    revokeReservedRoomAccess();
+    audit.record({
+      kind: "reserved:access:revoked",
+      message: "Reserved room access revoked for all saved devices",
+      actor: "admin",
+    });
+    res.json({ reserved: reservedRoomAccessState() });
   });
 
   // -- settings ------------------------------------------------------------

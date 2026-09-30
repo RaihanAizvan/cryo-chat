@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { AdminSettings } from "@cryo/shared";
+import type { AdminSettings, ReservedRoomAccess } from "@cryo/shared";
 import { adminApi } from "../adminApi";
 import { Badge, Card, CardHeader, EmptyState, ErrorBanner, Spinner } from "../components";
 import { usePoll } from "../usePoll";
@@ -42,11 +42,24 @@ export function AdminSettings() {
     useCallback(() => adminApi.settings(), []),
     POLL,
   );
+  const access = usePoll<ReservedRoomAccess>(
+    useCallback(() => adminApi.reservedRoom(), []),
+    POLL,
+  );
 
   const [form, setForm] = useState<Partial<AdminSettings> | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Reserved-room password controls. The value is write-only: it is sent to the
+  // server and never read back, so the field clears itself after a successful
+  // save instead of pretending to display the current value.
+  const [pwDraft, setPwDraft] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwDone, setPwDone] = useState<string | null>(null);
 
   // Initialize the editable form from the first settings snapshot that comes
   // back. Guarded so it only runs once — user edits are never overwritten by
@@ -68,6 +81,57 @@ export function AdminSettings() {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
 
   const reset = () => setForm({ ...current });
+
+  const locked = access.data?.locked ?? current.reservedRoomPasswordSet;
+
+  const setPassword = async () => {
+    setPwBusy(true);
+    setPwError(null);
+    setPwDone(null);
+    try {
+      await adminApi.setReservedRoomPassword(pwDraft);
+      setPwDraft("");
+      setShowPw(false);
+      setPwDone("Password updated. Everyone has to enter the new one.");
+      access.reload();
+      s.reload();
+    } catch (e) {
+      setPwError(e instanceof Error ? e.message : "Could not set the password");
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
+  const removePassword = async () => {
+    setPwBusy(true);
+    setPwError(null);
+    setPwDone(null);
+    try {
+      await adminApi.clearReservedRoomPassword();
+      setPwDraft("");
+      setPwDone("Password removed. The room is open to anyone with the code.");
+      access.reload();
+      s.reload();
+    } catch (e) {
+      setPwError(e instanceof Error ? e.message : "Could not remove the password");
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
+  const revokeAccess = async () => {
+    setPwBusy(true);
+    setPwError(null);
+    setPwDone(null);
+    try {
+      await adminApi.revokeReservedRoomAccess();
+      setPwDone("Saved access revoked. Every device has to enter the password again.");
+    } catch (e) {
+      setPwError(e instanceof Error ? e.message : "Could not revoke access");
+    } finally {
+      setPwBusy(false);
+    }
+  };
 
   const save = async () => {
     if (!form) return;
@@ -215,6 +279,104 @@ export function AdminSettings() {
               Save changes
             </button>
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Reserved room access"
+          subtitle="The always-open room behind the fixed code"
+          right={
+            <Badge tone={locked ? "green" : "amber"}>
+              {locked ? "password protected" : "open to anyone"}
+            </Badge>
+          }
+        />
+        <div className="p-4">
+          <p className="text-xs leading-relaxed text-ink-muted">
+            The code is only four characters, so the password is what actually
+            keeps the reserved room private. After a visitor types it once, their
+            device keeps an access token and is not asked again — until you
+            change the password or revoke access.
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
+            <span>Code</span>
+            <code className="rounded bg-base-sunken px-1.5 py-0.5 font-mono text-ink-muted">
+              {access.data?.code ?? current.reservedRoomCode}
+            </code>
+            {!access.data?.enabled && (
+              <Badge tone="faint">room disabled</Badge>
+            )}
+          </div>
+
+          <label className="mt-4 flex flex-col gap-1">
+            <span className="text-xs font-medium uppercase tracking-wider text-ink-faint">
+              {locked ? "Change password" : "Set a password"}
+            </span>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showPw ? "text" : "password"}
+                  value={pwDraft}
+                  onChange={(e) => setPwDraft(e.target.value)}
+                  placeholder="At least 4 characters"
+                  autoComplete="new-password"
+                  aria-label="Reserved room password"
+                  className="w-full rounded-xl border border-base-border2 bg-base-sunken px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPw((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint transition-colors hover:text-ink"
+                >
+                  {showPw ? "Hide" : "Show"}
+                </button>
+              </div>
+              <button
+                onClick={() => void setPassword()}
+                disabled={pwBusy || pwDraft.trim().length < 4}
+                className="shrink-0 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white transition-transform active:scale-[0.99] disabled:opacity-40"
+              >
+                {pwBusy ? "…" : locked ? "Update" : "Set"}
+              </button>
+            </div>
+            <span className="text-[11px] text-ink-faint">
+              {locked
+                ? "Changing it signs out every device that already unlocked the room."
+                : "Until you set one, anyone with the code can walk in."}
+            </span>
+          </label>
+
+          {pwError && (
+            <p className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+              {pwError}
+            </p>
+          )}
+          {pwDone && (
+            <p className="mt-3 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+              {pwDone}
+            </p>
+          )}
+
+          {locked && (
+            <div className="mt-4 flex flex-wrap gap-2 border-t border-base-border pt-4">
+              <button
+                onClick={() => void revokeAccess()}
+                disabled={pwBusy}
+                className="rounded-xl border border-base-border2 px-3 py-2 text-sm text-ink-muted transition-colors hover:text-ink disabled:opacity-40"
+              >
+                Revoke saved access
+              </button>
+              <button
+                onClick={() => void removePassword()}
+                disabled={pwBusy}
+                className="rounded-xl border border-rose-500/30 px-3 py-2 text-sm text-rose-300 transition-colors hover:bg-rose-500/10 disabled:opacity-40"
+              >
+                Remove password
+              </button>
+            </div>
+          )}
         </div>
       </Card>
     </div>

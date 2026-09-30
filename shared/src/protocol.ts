@@ -361,6 +361,16 @@ export interface AdminAuditEvent {
   detail?: string;
 }
 
+/** Access state of the reserved room, as shown in the admin console. */
+export interface ReservedRoomAccess {
+  /** True when a password is set, i.e. the room is locked. */
+  locked: boolean;
+  /** True when the reserved room is enabled at all. */
+  enabled: boolean;
+  /** The room's join code. */
+  code: string;
+}
+
 /** Runtime-tunable server settings (admin panel). */
 export interface AdminSettings {
   maxMessageLength: number;
