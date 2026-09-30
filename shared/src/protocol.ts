@@ -18,7 +18,14 @@ export interface ClientToServerEventMap {
   /** Create a brand-new room. Pass a code to claim a specific one. */
   "room:create": { code?: string };
   /** Join an existing room by code. */
-  "room:join": { code?: string; roomId?: string };
+  "room:join": {
+    code?: string;
+    roomId?: string;
+    /** Password for a password-protected room (the reserved room). */
+    password?: string;
+    /** Access token from a previous unlock, so nobody re-types the password. */
+    token?: string;
+  };
   /** Leave a room (may be silent if not present). */
   "room:leave": { roomId: string };
   /** Close a room: everyone is kicked and it is destroyed. */
@@ -57,6 +64,12 @@ export interface ServerToClientEventMap {
   "room:created": { roomId: string; code: string };
   /** Ack when the client successfully joined a room. */
   "room:joined": { room: PublicRoom };
+  /**
+   * Access token for a password-protected room, issued when a client proves the
+   * password (or presents a valid token). Store it and send it back on the next
+   * join instead of asking the user for the password again.
+   */
+  "room:access": { code: string; token: string; expiresAt: number };
   /** Ack when the client left a room. */
   "room:left": { roomId: string };
   /** A participant joined the room (client already inside). */
@@ -91,6 +104,10 @@ export type ErrorCode =
   | "room_exists"
   | "room_full"
   | "room_expired"
+  /** The room is password protected and no usable token was presented. */
+  | "room_password_required"
+  /** A password was presented but it isn't the right one. */
+  | "room_password_invalid"
   | "name_invalid"
   | "message_invalid"
   | "rate_limited"
@@ -102,6 +119,8 @@ export interface ErrorPayload {
   message: string;
   /** When set, this error is about the matching message send. */
   clientId?: string;
+  /** The room the error refers to, so a client can prompt for that room. */
+  roomCode?: string;
 }
 
 /** Colors a participant may be assigned (index into a fixed palette). */
@@ -228,6 +247,8 @@ export interface RoomStatus {
   /** Expiry the client should use (far-future for the persistent room). */
   expiresAt: number;
   persistent: boolean;
+  /** True when entry needs a password (the reserved room), so the UI can warn. */
+  locked: boolean;
 }
 
 export interface PublicRoom {
@@ -320,6 +341,9 @@ export type AdminAuditKind =
   | "media:upload"
   | "member:kicked"
   | "member:banned"
+  | "reserved:password:set"
+  | "reserved:password:removed"
+  | "reserved:access:revoked"
   | "settings:update";
 
 /** One entry of the admin audit trail. */
@@ -349,6 +373,11 @@ export interface AdminSettings {
   messageRateWindowSeconds: number;
   reservedRoomCode: string;
   reservedRoomEnabled: boolean;
+  /**
+   * True when the reserved room has a password. The password itself is never
+   * sent to a client — not even to the admin console.
+   */
+  reservedRoomPasswordSet: boolean;
   /** When false, the app hides the voice-note (mic) button. */
   voiceNotesEnabled: boolean;
   adminEnabled: boolean;

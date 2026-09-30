@@ -10,6 +10,7 @@
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
 import { config } from "./config.js";
 import { store } from "./store.js";
+import { hashPassword } from "./reserved.js";
 
 export interface SettingsDict {
   maxMessageLength: number;
@@ -22,6 +23,18 @@ export interface SettingsDict {
   messageRateWindowMs: number;
   reservedRoomCode: string;
   reservedRoomEnabled: boolean;
+  /**
+   * Salted scrypt hash of the reserved-room password. Empty means the room is
+   * open to anyone who knows the code. The plaintext never leaves the admin
+   * request that set it.
+   */
+  reservedRoomPassword: string;
+  /**
+   * Bumped whenever the password changes or saved access is revoked. Access
+   * tokens carry the version they were issued under, so this is the switch that
+   * signs everyone out without touching the password.
+   */
+  reservedRoomPasswordVersion: number;
   voiceNotesEnabled: boolean;
   sweepIntervalMs: number;
 }
@@ -59,6 +72,8 @@ function base(): SettingsDict {
     messageRateWindowMs: config.messageRateWindowMs,
     reservedRoomCode: config.reservedRoomCode,
     reservedRoomEnabled: true,
+    reservedRoomPassword: "",
+    reservedRoomPasswordVersion: 1,
     voiceNotesEnabled: true,
     sweepIntervalMs: config.sweepIntervalMs,
   };
@@ -144,6 +159,11 @@ export function updateSettings(patch: Record<string, unknown>): { ok: true; sett
       next.reservedRoomEnabled = patch.reservedRoomEnabled;
     }
   }
+  if (patch.reservedRoomPassword !== undefined) {
+    // The password is deliberately NOT part of the generic settings patch: it
+    // would end up in the audit detail blob and in every settings broadcast.
+    errors.push("Set the reserved-room password through its own endpoint.");
+  }
   if (patch.voiceNotesEnabled !== undefined) {
     if (typeof patch.voiceNotesEnabled !== "boolean") {
       errors.push("voiceNotesEnabled must be a boolean");
@@ -161,6 +181,69 @@ export function updateSettings(patch: Record<string, unknown>): { ok: true; sett
 /** True when `code` is the (enabled) preserved room code. */
 export function isReservedCode(code: string): boolean {
   return current.reservedRoomEnabled && code === current.reservedRoomCode;
+}
+
+/** True when the reserved room currently requires a password to enter. */
+export function reservedRoomLocked(): boolean {
+  return current.reservedRoomEnabled && current.reservedRoomPassword !== "";
+}
+
+/** The stored password hash ("" when the room is open). Never send to clients. */
+export function reservedRoomPasswordHash(): string {
+  return current.reservedRoomPassword;
+}
+
+/** Access-token generation this server is currently issuing for. */
+export function reservedRoomPasswordVersion(): number {
+  return current.reservedRoomPasswordVersion;
+}
+
+/** Shortest password we accept — long enough to not be a slip, short enough to type. */
+export const MIN_ROOM_PASSWORD_LENGTH = 4;
+/** Longest accepted password, so a paste of a whole document can't wedge it. */
+export const MAX_ROOM_PASSWORD_LENGTH = 128;
+
+/**
+ * Set (or change) the reserved-room password. Stores only a hash and bumps the
+ * access version, which invalidates every token handed out under the old one.
+ */
+export function setReservedRoomPassword(password: string): { ok: true } | { ok: false; error: string } {
+  const clean = password.normalize("NFKC").trim();
+  if (clean.length < MIN_ROOM_PASSWORD_LENGTH) {
+    return { ok: false, error: `Password must be at least ${MIN_ROOM_PASSWORD_LENGTH} characters.` };
+  }
+  if (clean.length > MAX_ROOM_PASSWORD_LENGTH) {
+    return { ok: false, error: `Password must be at most ${MAX_ROOM_PASSWORD_LENGTH} characters.` };
+  }
+  current = {
+    ...current,
+    reservedRoomPassword: hashPassword(clean),
+    reservedRoomPasswordVersion: current.reservedRoomPasswordVersion + 1,
+  };
+  void store.saveSettings(current);
+  return { ok: true };
+}
+
+/** Remove the password: the reserved room becomes open to anyone with the code. */
+export function clearReservedRoomPassword(): void {
+  current = {
+    ...current,
+    reservedRoomPassword: "",
+    reservedRoomPasswordVersion: current.reservedRoomPasswordVersion + 1,
+  };
+  void store.saveSettings(current);
+}
+
+/**
+ * Sign everyone out without changing the password: existing tokens stop
+ * verifying, so the next join asks for the password again.
+ */
+export function revokeReservedRoomAccess(): void {
+  current = {
+    ...current,
+    reservedRoomPasswordVersion: current.reservedRoomPasswordVersion + 1,
+  };
+  void store.saveSettings(current);
 }
 
 /** Effective message-length ceiling (min of protocol cap and admin setting). */

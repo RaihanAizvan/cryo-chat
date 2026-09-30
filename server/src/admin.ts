@@ -400,6 +400,8 @@ function settingsView(): AdminSettings {
     messageRateWindowSeconds: Math.round(s.messageRateWindowMs / 1000),
     reservedRoomCode: s.reservedRoomCode,
     reservedRoomEnabled: s.reservedRoomEnabled,
+    // The password itself is never exposed — only whether one is set.
+    reservedRoomPasswordSet: s.reservedRoomPassword !== "",
     voiceNotesEnabled: s.voiceNotesEnabled,
     adminEnabled: Boolean(config.adminKey),
   };
