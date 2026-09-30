@@ -172,11 +172,13 @@ function scheduleDeparture(
  * only covers same-instance reconnects; this covers a reconnect that landed on
  * another instance (or a reload) using the shared session -> rooms index.
  *
- * No password check happens here, and none is needed: the index only ever holds
- * rooms this identity was already a member of, so this can re-seat someone who
- * was inside — it can never seat someone who was not. If the admin rotated the
- * password meanwhile, the client's own re-join below goes through `admitRoom`
- * and asks for the new one.
+ * A locked room is deliberately skipped. The index only ever holds rooms this
+ * identity was already a member of, so re-seating can never let a stranger in —
+ * but it *would* keep someone inside across a password rotation, which is
+ * exactly what an admin changing the password is trying to stop. Skipping costs
+ * one tap: the client's `room:join` carries the stored token, so a device that
+ * still holds a valid one walks straight back in, and one whose token died gets
+ * asked for the password.
  */
 async function resumeRoom(io: Server, socket: Socket, session: Session): Promise<void> {
   const roomIds = await store.sessionRooms(session.id);
@@ -184,6 +186,7 @@ async function resumeRoom(io: Server, socket: Socket, session: Session): Promise
     if (ROOM_MEMBERSHIP.has(socket)) return; // already re-seated
     const room = await rooms.loadRoomFromStore(roomId);
     if (!room || rooms.isExpired(room)) continue;
+    if (room.persistent && isReservedRoomLocked()) continue;
     if (!joinInternal(io, socket, room)) continue;
     emitJoined(io, socket, room);
     return;
@@ -197,7 +200,10 @@ export function attachHandlers(io: Server, socket: Socket): void {
 
   // Connection-state recovery succeeded: the server restored our socket id and
   // room membership. Re-link the membership bookkeeping and resend the current
-  // room snapshot so the client is seamlessly back in the conversation.
+  // room snapshot so the client is seamlessly back in the conversation. This
+  // includes a locked reserved room on purpose: the window is two minutes and
+  // the conversation was never actually interrupted, so re-prompting here would
+  // be nagging rather than security.
   if (socket.recovered) {
     for (const room of rooms.allRooms()) {
       if (!room.sockets.has(socket.id)) continue;

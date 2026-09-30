@@ -125,7 +125,7 @@ export function AdminSettings() {
     setPwDone(null);
     try {
       await adminApi.revokeReservedRoomAccess();
-      setPwDone("Saved access revoked. Every device has to enter the password again.");
+      setPwDone("Saved access revoked. The next time someone joins, they have to enter the password again.");
     } catch (e) {
       setPwError(e instanceof Error ? e.message : "Could not revoke access");
     } finally {
@@ -297,7 +297,8 @@ export function AdminSettings() {
             The code is only four characters, so the password is what actually
             keeps the reserved room private. After a visitor types it once, their
             device keeps an access token and is not asked again — until you
-            change the password or revoke access.
+            change the password or revoke access, which stops every saved token
+            from working.
           </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">

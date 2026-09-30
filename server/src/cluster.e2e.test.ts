@@ -111,11 +111,12 @@ function once<A>(s: Socket, event: string): Promise<A> {
   return new Promise((resolve) => s.once(event, (d: A) => resolve(d)));
 }
 
-function makeClient(port: number) {
+function makeClient(port: number, sessionId?: string) {
   const s = createClient(`http://127.0.0.1:${port}`, {
     path: "/socket.io",
     transports: ["websocket"],
     timeout: 8000,
+    ...(sessionId ? { query: { sessionId } } : {}),
   });
   const connected = new Promise<Socket>((resolve, reject) => {
     s.once("connect", () => resolve(s));
@@ -266,5 +267,105 @@ runCluster("cross-instance moderation (shared Redis)", () => {
 
     alice.disconnect();
     bob.disconnect();
+  }, 60_000);
+});
+runCluster("reserved-room password is shared across instances (shared Redis)", () => {
+  /** Like `once`, but names the event that never arrived instead of hanging. */
+  function soon<A>(s: Socket, event: string, ms = 10_000): Promise<A> {
+    return new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error(`no "${event}" within ${ms}ms`)), ms);
+      s.once(event, (d: A) => {
+        clearTimeout(t);
+        res(d);
+      });
+    });
+  }
+
+  let instA: ServerHandle;
+  let instB: ServerHandle;
+  let adminA: ReturnType<typeof adminFor>;
+  let adminB: ReturnType<typeof adminFor>;
+
+  beforeAll(async () => {
+    instA = await bootInstance({
+      REDIS_URL: redisUrl,
+      REDIS_PREFIX: prefix,
+      INSTANCE_ID: "reserved-cluster-a",
+    });
+    instB = await bootInstance({
+      REDIS_URL: redisUrl,
+      REDIS_PREFIX: prefix,
+      INSTANCE_ID: "reserved-cluster-b",
+    });
+    adminA = adminFor(instA.port);
+    adminB = adminFor(instB.port);
+  }, 40_000);
+
+  afterAll(async () => {
+    await Promise.all([instA.stop(), instB.stop()]);
+  }, 15_000);
+
+  it("enforces one password and one signing key on every instance", async () => {
+    // Configure and lock the reserved room through instance A only.
+    const code = await adminA("/settings", {
+      method: "PUT",
+      body: { reservedRoomCode: "CRYO", reservedRoomEnabled: true },
+    });
+    expect(code.status).toBe(200);
+    const locked = await adminA("/reserved-room/password", {
+      method: "PUT",
+      body: { password: "cold brew" },
+    });
+    expect(locked.status).toBe(200);
+
+    // Instance B learned about it through the settings broadcast.
+    await new Promise((r) => setTimeout(r, 500));
+    const viewB = await adminB("/reserved-room");
+    expect((viewB.body as { reserved: { locked: boolean; code: string } }).reserved).toMatchObject({
+      locked: true,
+      code: "CRYO",
+    });
+
+    // ...and enforces it.
+    const bob = makeClient(instB.port);
+    const socketB = await bob.connected;
+    const bobInit = await bob.init;
+    const denied = soon<ErrorPayload>(socketB, "error");
+    socketB.emit("room:join", { code: "CRYO" });
+    expect((await denied).code).toBe("room_password_required");
+
+    // Unlocking on B yields a token that A accepts: the signing key is derived
+    // from the shared password hash, not from per-instance state.
+    const joined = soon<{ room: { code: string } }>(socketB, "room:joined");
+    const access = soon<{ token: string }>(socketB, "room:access");
+    socketB.emit("room:join", { code: "CRYO", password: "cold brew" });
+    expect((await joined).room.code).toBe("CRYO");
+    const { token } = await access;
+
+    // Same identity, landed on the *other* instance: this is the leg that proves
+    // the token is not signed with per-instance state.
+    const alice = makeClient(instA.port, bobInit.sessionId);
+    const socketA = await alice.connected;
+    await alice.init;
+    const joinedA = soon<{ room: { code: string } }>(socketA, "room:joined");
+    socketA.emit("room:join", { code: "CRYO", token });
+    expect((await joinedA).room.code).toBe("CRYO");
+
+    // A revoke on A invalidates the token B handed out. Checked from a *fresh*
+    // identity: an identity that is already a member is deliberately re-seated
+    // on reconnect by the server's recovery path, without a password check.
+    const revoke = await adminA("/reserved-room/revoke-access", { method: "POST" });
+    expect(revoke.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 500));
+    const dave = makeClient(instB.port);
+    const socketD = await dave.connected;
+    await dave.init;
+    const afterRevoke = soon<ErrorPayload>(socketD, "error");
+    socketD.emit("room:join", { code: "CRYO", token });
+    expect((await afterRevoke).code).toBe("room_password_required");
+
+    socketA.disconnect();
+    socketB.disconnect();
+    socketD.disconnect();
   }, 60_000);
 });

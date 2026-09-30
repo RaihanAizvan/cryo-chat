@@ -87,7 +87,11 @@ password in front of it: **Settings → Reserved room access**.
   out every device that had already unlocked the room, because access tokens are
   signed with a key derived from the password hash.
 - **Revoke saved access.** Bumps the access version without touching the
-  password: everyone's saved token stops verifying and they are asked again.
+  password: everyone's saved token stops verifying and they are asked again the
+  next time they join. A device already holding a valid token walks straight
+  back in. Someone who is mid-conversation keeps their seat through a two-minute
+  reconnect, but a page reload lands on the home screen and goes through the door
+  again — a rotation is not an eviction, it just stops working for good.
 - **Remove the password.** The room goes back to being open to anyone with the
   code. The endpoint refuses when no password is set, so it can't be used to
   probe state.

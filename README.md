@@ -135,7 +135,7 @@ The honest trade-off: it's not for things you need to keep. It's for the here-an
 No. In-memory only, pruned by a timer. Nothing touches a disk database.
 
 **How do I put a password on the reserved room?**
-Admin console → Settings → "Reserved room access". Set a password, and the room behind your fixed code asks for it. Visitors type it once; their device keeps a signed access token, so they aren't asked again until you change the password or revoke access. Changing it, or revoking access, signs every saved device out. Wrong guesses are rate limited, and the password is stored only as a hash.
+Admin console → Settings → "Reserved room access". Set a password, and the room behind your fixed code asks for it. Visitors type it once; their device keeps a signed access token, so they aren't asked again until you change the password or revoke access. Changing it, or revoking access, signs every saved device out: their token stops working, so the next join asks again. Wrong guesses are rate limited, and the password is stored only as a hash.
 
 **Why did my room vanish?**
 Rooms expire after being quiet for a bit (longer while people are in them). That's the point — it's ephemeral.

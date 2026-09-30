@@ -477,15 +477,22 @@ runIntegration("reserved room password on the production bundle", () => {
 
   it("signs saved devices out on password change, revoke, and removal", async () => {
     await withLockedRoom(async ({ port, admin: adminLocal }) => {
+      // Unlocks, then *leaves* the room before disconnecting: a member who is
+      // still inside is re-seated by the server's recovery path, and this test
+      // is about what happens to a device that has to go through the door again.
       const unlock = async () => {
         const c = makeClient(port);
         const s = await c.connected;
         const init = await c.init;
         const access = once<{ token: string }>(s, "room:access");
-        const joined = once<{ room: { code: string } }>(s, "room:joined");
+        const joined = once<{ room: { code: string; id: string } }>(s, "room:joined");
         s.emit("room:join", { code: "CRYO", password: PASSWORD });
-        await joined;
-        return { socket: s, sessionId: init.sessionId, token: (await access).token };
+        const room = (await joined).room;
+        const token = (await access).token;
+        const left = once<{ roomId: string }>(s, "room:left");
+        s.emit("room:leave", { roomId: room.id });
+        await left;
+        return { socket: s, sessionId: init.sessionId, token };
       };
       /** Join with a token as a returning device and report what happened. */
       const tryToken = async (sessionId: string, token: string): Promise<string> => {
