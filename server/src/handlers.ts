@@ -19,6 +19,7 @@ import * as audit from "./audit.js";
 import { normalizeMessage, normalizeCaption } from "./validation.js";
 import { normalizeCode } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
+import { decideEntry, issueAccessToken, isReservedRoomLocked } from "./reserved.js";
 import { isBanned } from "./bans.js";
 import { store } from "./store.js";
 import type { RoomEventEnvelope } from "./store.js";
@@ -68,6 +69,86 @@ function cancelDeparturesForRoom(roomId: string): void {
   }
 }
 
+/** Password attempts allowed per identity, and per address, per minute. */
+const PASSWORD_ATTEMPTS_PER_SESSION = 10;
+const PASSWORD_ATTEMPTS_PER_IP = 40;
+
+/**
+ * The reserved room is the only password-protected room, so the gate keys off
+ * the room itself (persistent) rather than off which path was used. That matters:
+ * a share link (`/r/:id`) and claiming the code via `room:create` are just as
+ * real a way in as typing the code, and all of them go through here.
+ *
+ * A socket that is already seated in the room is let straight through — that is
+ * the server's own recovery path (connection-state recovery, or a reconnect
+ * re-seat), and the only way to be seated is to have passed this gate before.
+ * Without that carve-out, re-joining a room you are already in would demand the
+ * password again for no reason.
+ *
+ * Returns true when the caller may enter. On success an access token is issued
+ * (or refreshed) so the device is not asked again.
+ */
+async function admitRoom(
+  socket: Socket,
+  room: rooms.Room,
+  password: unknown,
+  token: unknown,
+): Promise<boolean> {
+  if (room.sockets.has(socket.id)) return true;
+  if (!room.persistent || !isReservedRoomLocked()) return true;
+
+  const sessionId = getSession(socket).id;
+  const guessing = typeof password === "string" && password.length > 0;
+  if (guessing) {
+    // The password is the only real secret behind a 4-character code, so a
+    // wrong guess costs a scrypt hash on the server. Throttle by identity and
+    // by address so the pair cannot be walked.
+    const ip = socket.handshake.address ?? "unknown";
+    const allowed =
+      (await store.rateLimit(
+        `roomkey:${room.code}:${sessionId}`,
+        PASSWORD_ATTEMPTS_PER_SESSION,
+        60_000,
+      )) &&
+      (await store.rateLimit(`roomkey-ip:${room.code}:${ip}`, PASSWORD_ATTEMPTS_PER_IP, 60_000));
+    if (!allowed) {
+      sendError(socket, {
+        code: "rate_limited",
+        message: "Too many password attempts. Wait a minute and try again.",
+        roomCode: room.code,
+      });
+      return false;
+    }
+  }
+
+  const decision = decideEntry(true, room.code, sessionId, password, token);
+  if (decision === "open" || decision === "granted") {
+    const issued = issueAccessToken(room.code, sessionId);
+    if (issued) {
+      socket.emit("room:access", {
+        code: room.code,
+        token: issued.token,
+        expiresAt: issued.expiresAt,
+      });
+    }
+    return true;
+  }
+  if (decision === "invalid") {
+    sendError(socket, {
+      code: "room_password_invalid",
+      message: "That password isn't right.",
+      roomCode: room.code,
+    });
+    return false;
+  }
+  sendError(socket, {
+    code: "room_password_required",
+    message: "This room is reserved. Please enter the password.",
+    roomCode: room.code,
+  });
+  return false;
+}
+
 /** After a disconnect, give the client a grace window to recover before leaving. */
 function scheduleDeparture(
   io: Server,
@@ -90,6 +171,12 @@ function scheduleDeparture(
  * Re-seat a reconnecting session into its room. The local recovery path above
  * only covers same-instance reconnects; this covers a reconnect that landed on
  * another instance (or a reload) using the shared session -> rooms index.
+ *
+ * No password check happens here, and none is needed: the index only ever holds
+ * rooms this identity was already a member of, so this can re-seat someone who
+ * was inside — it can never seat someone who was not. If the admin rotated the
+ * password meanwhile, the client's own re-join below goes through `admitRoom`
+ * and asks for the new one.
  */
 async function resumeRoom(io: Server, socket: Socket, session: Session): Promise<void> {
   const roomIds = await store.sessionRooms(session.id);
@@ -185,6 +272,9 @@ export function attachHandlers(io: Server, socket: Socket): void {
       sendError(socket, { code: "room_exists", message: "That code is taken." });
       return;
     }
+    // Claiming the reserved code is just another way into that room, so the
+    // password applies here too.
+    if (!(await admitRoom(socket, room, raw?.password, raw?.token))) return;
     if (!joinInternal(io, socket, room)) return;
     socket.emit("room:created", { roomId: room.id, code: room.code });
     audit.record({
@@ -202,7 +292,8 @@ export function attachHandlers(io: Server, socket: Socket): void {
     // Accept either a short code or a full room id (from a shared link).
     const code = typeof raw?.code === "string" ? normalizeCode(raw.code) : undefined;
     const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
-    // The reserved code always works — recreate (or reuse) it on demand.
+    // The reserved code always resolves — recreate (or reuse) it on demand —
+    // but resolving it is not the same as being allowed in.
     const room = roomId
       ? await rooms.loadRoomFromStore(roomId)
       : code && isReservedCode(code)
@@ -214,6 +305,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
       sendError(socket, { code: "room_not_found", message: "Room not found." });
       return;
     }
+    if (!(await admitRoom(socket, room, raw?.password, raw?.token))) return;
     if (!joinInternal(io, socket, room)) return;
     emitJoined(io, socket, room);
   });
@@ -258,7 +350,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
           ? await rooms.loadRoomFromStore(roomId)
           : undefined;
       if (!room) {
-        statuses.push({ code, roomId, exists: false, participantCount: 0, expiresAt: 0, persistent: false });
+        statuses.push({ code, roomId, exists: false, participantCount: 0, expiresAt: 0, persistent: false, locked: false });
         continue;
       }
       statuses.push({
@@ -268,6 +360,9 @@ export function attachHandlers(io: Server, socket: Socket): void {
         participantCount: room.participants.size,
         expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
         persistent: room.persistent,
+        // Lets the home screen show a lock before the user tries to join,
+        // instead of a password prompt after the fact.
+        locked: room.persistent && isReservedRoomLocked(),
       });
     }
     socket.emit("room:status:result", { statuses });
