@@ -77,8 +77,35 @@ and RAM stays flat.
 - **Disabled automatically** when the Cloudinary creds are unset — the tab
   just disappears, and "Make a sticker"/Giphy keep working.
 
-## Option 2 — Backend on Abasthan, frontend on Vercel
+## Reserved room password (optional)
 
+The reserved room is the always-open room behind a fixed code (`reservedRoomCode`
+in the admin console). Because the code is only four characters, you can put a
+password in front of it: **Settings → Reserved room access**.
+
+- **Set / change a password.** Stored as a salted scrypt hash. Changing it signs
+  out every device that had already unlocked the room, because access tokens are
+  signed with a key derived from the password hash.
+- **Revoke saved access.** Bumps the access version without touching the
+  password: everyone's saved token stops verifying and they are asked again.
+- **Remove the password.** The room goes back to being open to anyone with the
+  code. The endpoint refuses when no password is set, so it can't be used to
+  probe state.
+- **Tokens.** After one successful entry a device gets a signed token
+  (30 days, bound to that anonymous identity and to that room) and stores it
+  locally, so reloads and reconnects don't re-prompt. It is not a session or a
+  server-side grant — nothing to revoke but the version, and nothing to leak
+  from a store.
+- **Brute force.** Password attempts are rate limited per identity (10/min) and
+  per address (40/min), and each attempt costs a scrypt hash.
+- **Ops.** The same three actions are available over the admin REST API
+  (`PUT`/`DELETE /admin/reserved-room/password`,
+  `POST /admin/reserved-room/revoke-access`) for scripting, and every one of
+  them lands in the audit trail without the password. The password cannot be
+  set through `PUT /admin/settings` — that endpoint rejects the field so it can
+  never end up in a settings broadcast or an audit detail.
+
+## Option 2 — Backend on Abasthan, frontend on Vercel
 - **Abasthan (backend):** Web Service as above. Add
   `CORS_ORIGIN=https://<your-app>.vercel.app`.
 - **Vercel (frontend):** set the dashboard root directory to `client`, then add

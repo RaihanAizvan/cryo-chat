@@ -17,6 +17,7 @@ hop in, talk, bounce, and the room melts away on its own.
 - **Rich messages.** Emoji picker with recents, WhatsApp-style large emoji, image upload, stickers, and reply quotes.
 - **Voice notes.** Record and send audio that plays back in the room.
 - **Moderation.** An admin console (`/admin`) with live rooms, users, audit trail, analytics, and settings you can turn on/off live.
+- **A reserved room, if you want one.** The always-open room behind a fixed code can be put behind a password, so the code alone doesn't let anyone in.
 
 ![Home screen](docs/screenshots/home.png)
 
@@ -112,6 +113,7 @@ Both already work out of the box.
 - No accounts, no email, no tracking. Your name is just text you type in your browser — nothing is stored.
 - Everything lives in server memory and is swept away by a timer. No database to leak.
 - Rooms and messages auto-expire. Old chats don't hang around.
+- The reserved-room password is stored as a salted scrypt hash, never in plain text, and is never sent to a browser. Visitors get a signed access token instead of retyping it.
 
 The honest trade-off: it's not for things you need to keep. It's for the here-and-now.
 
@@ -131,6 +133,9 @@ The honest trade-off: it's not for things you need to keep. It's for the here-an
 
 **Will you save my messages?**
 No. In-memory only, pruned by a timer. Nothing touches a disk database.
+
+**How do I put a password on the reserved room?**
+Admin console → Settings → "Reserved room access". Set a password, and the room behind your fixed code asks for it. Visitors type it once; their device keeps a signed access token, so they aren't asked again until you change the password or revoke access. Changing it, or revoking access, signs every saved device out. Wrong guesses are rate limited, and the password is stored only as a hash.
 
 **Why did my room vanish?**
 Rooms expire after being quiet for a bit (longer while people are in them). That's the point — it's ephemeral.
