@@ -246,7 +246,7 @@ export function MessageBubble({
   );
 
   const quote = message.replyTo ? (
-    <ReplyQuote reply={message.replyTo} mine={mine} onTap={onQuoteTap} />
+    <ReplyQuote reply={message.replyTo} mine={mine} sessionId={sessionId} onTap={onQuoteTap} />
   ) : null;
 
   return (

@@ -13,13 +13,14 @@ import {
   uploadToCloudinary,
   registerRemoteMedia,
   preloadStickers,
+  mediaUrl,
   type UploadResult,
 } from "../../lib/api";
 import { prepareUpload } from "../../lib/image";
 import { makeSticker } from "../../lib/sticker";
 import { recordEmoji } from "../../lib/emoji";
 import { startVoiceRecording, type ActiveVoiceRecording } from "../../lib/voice";
-import { useVoiceNotesEnabled } from "../../lib/store";
+import { useSession, useVoiceNotesEnabled } from "../../lib/store";
 import { useCoarsePointer, useKeyboardInset } from "../../hooks/useKeyboardInset";
 
 interface Props {
@@ -69,6 +70,24 @@ function replyPreview(m: PublicMessage): string {
   return "Photo";
 }
 
+/** Preview of the media on the message being replied to (sticker/photo/GIF). */
+function ReplyThumb({ m, sessionId }: { m: PublicMessage; sessionId: string }) {
+  const a = m.attachment;
+  if (!a?.mediaId || a.viewOnce || a.type === "voice") return null;
+  return (
+    <img
+      src={mediaUrl(a.mediaId, sessionId)}
+      alt=""
+      loading="lazy"
+      draggable={false}
+      className={`h-6 w-6 shrink-0 rounded ${
+        // Stickers are cut-outs: cropping to a square cuts off the sticker.
+        a.type === "sticker" ? "object-contain" : "border border-base-border object-cover"
+      }`}
+    />
+  );
+}
+
 export function MessageComposer({
   onSend,
   onHeightChange,
@@ -90,6 +109,7 @@ export function MessageComposer({
   const isCoarse = useCoarsePointer();
   const { inset } = useKeyboardInset();
   const voiceNotesEnabled = useVoiceNotesEnabled();
+  const sessionId = useSession().sessionId ?? "";
   const taRef = useRef<HTMLTextAreaElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -514,8 +534,11 @@ export function MessageComposer({
               <div className="truncate text-[10px] font-semibold text-accent">
                 {replyTarget.name}
               </div>
-              <div className="truncate text-xs text-ink-muted">
-                {replyPreview(replyTarget)}
+              <div className="flex min-w-0 items-center gap-1.5">
+                <ReplyThumb m={replyTarget} sessionId={sessionId} />
+                <span className="truncate text-xs text-ink-muted">
+                  {replyPreview(replyTarget)}
+                </span>
               </div>
             </div>
             <button
