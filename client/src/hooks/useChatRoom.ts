@@ -10,6 +10,7 @@ import { connectAndInit, socket, useSession, wasRecentlyReconnected, lastDisconn
 import { genClientId } from "../lib/ids";
 import { recordRoomHistory, touchRoomHistory } from "../lib/roomHistory";
 import { replySnapshot } from "../lib/reply";
+import { clearRoomKey, getRoomKey, setRoomKey } from "../lib/roomKey";
 
 // Slightly above the server's connection-state-recovery window (120s): if the
 // drop lasted longer, the server can't restore us, so re-join explicitly.
@@ -25,6 +26,8 @@ export interface RoomState {
   joinError: string | null;
   /** Modal alert for a room that was closed or expired behind the user. */
   alert: { title: string; message: string } | null;
+  /** Password prompt for the reserved room (code + last error, if any). */
+  passwordPrompt: { code: string; error: string | null } | null;
   /** Participant IDs currently typing (auto-clears after a timeout). */
   typingParticipants: string[];
   /** Per-participant last-read message id (read receipts). */
@@ -44,6 +47,8 @@ export interface RoomActions {
   clearNotice: () => void;
   clearJoinError: () => void;
   dismissAlert: () => void;
+  submitPassword: (password: string) => void;
+  cancelPassword: () => void;
 }
 
 export function useChatRoom(): [RoomState, RoomActions] {
@@ -54,6 +59,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
   const [notice, setNotice] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [alert, setAlert] = useState<RoomState["alert"]>(null);
+  const [passwordPrompt, setPasswordPrompt] = useState<RoomState["passwordPrompt"]>(null);
   const [typingParticipants, setTypingParticipants] = useState<string[]>([]);
   const [seenBy, setSeenBy] = useState<Record<string, string>>({});
 
@@ -62,6 +68,10 @@ export function useChatRoom(): [RoomState, RoomActions] {
   const participantsRef = useRef<Participant[]>([]);
   const messagesRef = useRef<PublicMessage[]>([]);
   const seenByRef = useRef<Record<string, string>>({});
+  const passwordPromptRef = useRef<RoomState["passwordPrompt"]>(null);
+  useEffect(() => {
+    passwordPromptRef.current = passwordPrompt;
+  }, [passwordPrompt]);
   // A join-by-code that missed: remember it so we can create the room with that
   // exact code instead of showing a "room not available" dead end.
   const pendingJoinCode = useRef<string | null>(null);
@@ -241,8 +251,13 @@ export function useChatRoom(): [RoomState, RoomActions] {
       if (!r) return;
       const gap = Date.now() - lastDisconnectAt;
       if (gap > RECONNECT_REJOIN_MS) {
-        socket.emit("room:join", { code: r.code });
+        socket.emit("room:join", { code: r.code, token: getRoomKey(r.code) ?? undefined });
       }
+    };
+    // The server unlocked us: keep the token so reloads and reconnects never
+    // ask for the password again.
+    const onAccess = (data: { code: string; token: string; expiresAt: number }) => {
+      setRoomKey(data.code, { token: data.token, expiresAt: data.expiresAt });
     };
     const onError = (err: ErrorPayload) => {
       // A message-specific error marks the matching optimistic bubble as failed.
@@ -255,13 +270,29 @@ export function useChatRoom(): [RoomState, RoomActions] {
         return;
       }
       switch (err.code) {
+        case "room_password_required":
+        case "room_password_invalid": {
+          const code = err.roomCode;
+          if (!code) break;
+          // A rejected token means the password was rotated or access revoked;
+          // drop it so the retry starts from a clean slate.
+          clearRoomKey(code);
+          setPasswordPrompt({
+            code,
+            error:
+              err.code === "room_password_invalid"
+                ? "That password isn't right. Try again."
+                : err.message,
+          });
+          return;
+        }
         case "room_not_found":
           // Join-by-code missed → create the room with that exact code instead
           // of a dead-end error. Guarded to well-formed codes only.
           if (pendingJoinCode.current && /^[A-Z0-9]{4}$/.test(pendingJoinCode.current)) {
             const code = pendingJoinCode.current;
             pendingJoinCode.current = null;
-            socket.emit("room:create", { code });
+            socket.emit("room:create", { code, token: getRoomKey(code) ?? undefined });
             return;
           }
           setJoinError("That room doesn't exist. Check the code and try again.");
@@ -271,7 +302,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
           if (pendingJoinCode.current) {
             const code = pendingJoinCode.current;
             pendingJoinCode.current = null;
-            socket.emit("room:join", { code });
+            socket.emit("room:join", { code, token: getRoomKey(code) ?? undefined });
             return;
           }
           break;
@@ -306,6 +337,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
     socket.on("room:closed", onClosed);
     socket.on("room:kicked", onKicked);
     socket.on("connect", onConnect);
+    socket.on("room:access", onAccess);
     socket.on("error", onError);
 
     return () => {
@@ -322,6 +354,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       socket.off("room:closed", onClosed);
       socket.off("room:kicked", onKicked);
       socket.off("connect", onConnect);
+      socket.off("room:access", onAccess);
       socket.off("error", onError);
     };
   }, [enterRoom, exitRoom, touchHistory, session.sessionId]);
@@ -339,11 +372,25 @@ export function useChatRoom(): [RoomState, RoomActions] {
     if (trimmed.length <= 8) {
       const code = trimmed.toUpperCase();
       pendingJoinCode.current = code;
-      socket.emit("room:join", { code });
+      // Already unlocked this room on this device? Skip the prompt entirely.
+      socket.emit("room:join", { code, token: getRoomKey(code) ?? undefined });
     } else {
       pendingJoinCode.current = null;
+      // A share link may point at a locked room; the code isn't known here, so
+      // the server answers with roomCode and the prompt opens from that.
       socket.emit("room:join", { roomId: trimmed });
     }
+  }, []);
+
+  const submitPassword = useCallback((password: string) => {
+    const prompt = passwordPromptRef.current;
+    if (!prompt) return;
+    setPasswordPrompt((prev) => (prev ? { ...prev, error: null } : prev));
+    socket.emit("room:join", { code: prompt.code, password });
+  }, []);
+
+  const cancelPassword = useCallback(() => {
+    setPasswordPrompt(null);
   }, []);
 
   const clearJoinError = useCallback(() => setJoinError(null), []);
@@ -444,6 +491,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       notice,
       joinError,
       alert,
+      passwordPrompt,
       typingParticipants,
       seenBy,
     },
@@ -460,6 +508,8 @@ export function useChatRoom(): [RoomState, RoomActions] {
       clearNotice,
       clearJoinError,
       dismissAlert,
+      submitPassword,
+      cancelPassword,
     },
   ];
 }

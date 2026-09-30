@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useChatRoom } from "./hooks/useChatRoom";
 import { LandingScreen } from "./components/landing/LandingScreen";
 import { ChatRoom } from "./components/chat/ChatRoom";
+import { ReservedPassword } from "./components/landing/ReservedPassword";
 import { Modal } from "./components/ui/Modal";
 import { IconAlertTriangle } from "./components/ui/Icon";
 import { AdminApp } from "./admin/AdminApp";
@@ -14,7 +15,7 @@ import { AdminApp } from "./admin/AdminApp";
 function deepLinkTarget(): { code: string } | { roomId: string } | null {
   const r = window.location.pathname.match(/^\/r\/([A-Za-z0-9]+)/);
   if (r) return { roomId: r[1] };
-  const code = window.location.pathname.match(/^\/(\d{4})$/);
+  const code = window.location.pathname.match(/^\/([A-Za-z0-9]{4})$/);
   if (code) return { code: code[1] };
   return null;
 }
@@ -83,6 +84,16 @@ function ChatApp() {
             </button>
           </div>
         </Modal>
+      )}
+
+      {/* Reserved room is locked and this device has no (valid) token. */}
+      {state.passwordPrompt && (
+        <ReservedPassword
+          code={state.passwordPrompt.code}
+          error={state.passwordPrompt.error}
+          onSubmit={actions.submitPassword}
+          onClose={actions.cancelPassword}
+        />
       )}
     </div>
   );

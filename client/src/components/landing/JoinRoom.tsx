@@ -33,18 +33,20 @@ export function JoinRoom({ error, onErrorClear, onClose, onJoin }: Props) {
       </div>
 
       <p className="mb-4 text-sm text-ink-muted">
-        Enter a 4-digit code. If that room doesn't exist yet, we'll start one
+        Enter a 4-character code. If that room doesn't exist yet, we'll start one
         with that code for you.
       </p>
 
       <input
         autoFocus
         value={code}
-        onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+        onChange={(e) =>
+          setCode(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4).toUpperCase())
+        }
         onKeyDown={(e) => e.key === "Enter" && submit()}
         placeholder="e.g. 9184"
-        inputMode="numeric"
-        autoCapitalize="none"
+        inputMode="text"
+        autoCapitalize="characters"
         autoCorrect="off"
         spellCheck={false}
         maxLength={4}
