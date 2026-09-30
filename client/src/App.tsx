@@ -86,11 +86,12 @@ function ChatApp() {
         </Modal>
       )}
 
-      {/* Reserved room is locked and this device has no (valid) token. */}
+      {/* A room asked for its password and this device has no valid token. */}
       {state.passwordPrompt && (
         <ReservedPassword
           code={state.passwordPrompt.code}
           error={state.passwordPrompt.error}
+          busy={state.passwordPrompt.busy}
           onSubmit={actions.submitPassword}
           onClose={actions.cancelPassword}
         />

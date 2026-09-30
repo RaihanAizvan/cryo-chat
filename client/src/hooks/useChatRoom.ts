@@ -26,8 +26,11 @@ export interface RoomState {
   joinError: string | null;
   /** Modal alert for a room that was closed or expired behind the user. */
   alert: { title: string; message: string } | null;
-  /** Password prompt for the reserved room (code + last error, if any). */
-  passwordPrompt: { code: string; error: string | null } | null;
+  /**
+   * Password prompt for a protected room. `error` is set only when a password
+   * was actually rejected — being asked for one is not an error.
+   */
+  passwordPrompt: { code: string; error: string | null; busy: boolean } | null;
   /** Participant IDs currently typing (auto-clears after a timeout). */
   typingParticipants: string[];
   /** Per-participant last-read message id (read receipts). */
@@ -84,6 +87,9 @@ export function useChatRoom(): [RoomState, RoomActions] {
 
   const enterRoom = useCallback((r: PublicRoom, msgs: PublicMessage[]) => {
     pendingJoinCode.current = null;
+    // Being in the room is the answer to the prompt; without this the modal
+    // would sit on top of the conversation it just unlocked.
+    setPasswordPrompt(null);
     roomRef.current = r;
     participantsRef.current = r.participants;
     messagesRef.current = msgs;
@@ -279,10 +285,11 @@ export function useChatRoom(): [RoomState, RoomActions] {
           clearRoomKey(code);
           setPasswordPrompt({
             code,
+            // Only a rejected password is an error. The "password required"
+            // message is just the prompt being informative.
             error:
-              err.code === "room_password_invalid"
-                ? "That password isn't right. Try again."
-                : err.message,
+              err.code === "room_password_invalid" ? "That password isn't right." : null,
+            busy: false,
           });
           return;
         }
@@ -382,14 +389,18 @@ export function useChatRoom(): [RoomState, RoomActions] {
     }
   }, []);
 
-  const submitPassword = useCallback((password: string) => {
+    const submitPassword = useCallback((password: string) => {
     const prompt = passwordPromptRef.current;
     if (!prompt) return;
-    setPasswordPrompt((prev) => (prev ? { ...prev, error: null } : prev));
+    // Hold the prompt open with a spinner until the server answers: entering a
+    // password is a round trip, and a modal that closes on click reads as if
+    // nothing happened.
+    setPasswordPrompt({ ...prompt, error: null, busy: true });
     socket.emit("room:join", { code: prompt.code, password });
   }, []);
 
   const cancelPassword = useCallback(() => {
+    passwordPromptRef.current = null;
     setPasswordPrompt(null);
   }, []);
 
