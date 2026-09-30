@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
 import { Avatar } from "../ui/Avatar";
-import { IconCopy, IconCheck, IconLink } from "../ui/Icon";
+import { IconCopy, IconCheck, IconLink, IconLock } from "../ui/Icon";
 import { roomShareLink } from "../../lib/shareLink";
+import { getRoomKey } from "../../lib/roomKey";
 
 interface Props {
   room: PublicRoom;
@@ -94,8 +95,7 @@ export function ShareRoom({ room, participants, selfId }: Props) {
               <IconLink width={18} height={18} /> Copy invite link
             </>
           )}
-        </button>
-        <button
+        </button>        <button
           onClick={() => copy("code")}
           className="flex w-full items-center justify-center gap-2 rounded-2xl border border-base-border2 bg-base-raised py-3.5 text-[15px] font-semibold text-ink transition-colors active:bg-base-border"
         >
@@ -112,6 +112,18 @@ export function ShareRoom({ room, participants, selfId }: Props) {
             </>
           )}
         </button>
+        {/* A token for this room only exists if the room asked for a password,
+            so this is an honest signal — and the person you invite will hit it. */}
+        {getRoomKey(room.code) && (
+          <p className="flex items-start gap-2 rounded-xl bg-base-sunken px-3 py-2.5 text-left text-xs text-ink-faint">
+            <IconLock width={14} height={14} className="mt-px shrink-0" />
+            <span>
+              This room is password protected. Whoever you invite will be asked
+              for the password after opening the link — send it to them
+              separately, never in the same message.
+            </span>
+          </p>
+        )}
       </div>
     </div>
   );

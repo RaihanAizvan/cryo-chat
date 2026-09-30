@@ -37,6 +37,8 @@ export interface HistoryEntry {
   persistent: boolean;
   /** True once the room is known to be closed (not just expired). */
   closed: boolean;
+  /** True when the room needs a password (reserved room, per the server). */
+  locked: boolean;
 }
 
 type Listener = () => void;
@@ -74,6 +76,8 @@ class RoomHistoryStore {
       isHost: meta.isHost,
       persistent: room.persistent,
       closed: false,
+      // Preserved across reloads; the status poll keeps it fresh.
+      locked: idx >= 0 ? this.entries[idx].locked : false,
     };
     if (idx >= 0) this.entries.splice(idx, 1);
     this.entries.unshift(entry);
@@ -96,6 +100,7 @@ class RoomHistoryStore {
       expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
       persistent: room.persistent,
       closed: false,
+      locked: this.entries[idx].locked,
     };
     this.entries.splice(idx, 1);
     this.entries.unshift(updated);
@@ -115,6 +120,7 @@ class RoomHistoryStore {
         ...e,
         lastParticipants: st.exists ? st.participantCount : e.lastParticipants,
         closed: !st.exists,
+        locked: st.exists ? !!st.locked : e.locked,
         // A persistent room is never considered expired (stays "always open"),
         // but it IS closed when the server reports it gone.
         expiresAt: st.exists

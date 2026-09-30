@@ -9,7 +9,7 @@ import {
 import { timeAgo } from "../../lib/format";
 import { useNow } from "../../hooks/useNow";
 import { Avatar } from "../ui/Avatar";
-import { IconX, IconCheck, IconLink } from "../ui/Icon";
+import { IconX, IconCheck, IconLink, IconLock } from "../ui/Icon";
 import { roomShareLink } from "../../lib/shareLink";
 
 interface Props {
@@ -88,6 +88,17 @@ function HistoryRow({
             >
               {live ? (entry.persistent ? "open" : "active") : status}
             </span>
+            {/* A locked room still works, it just asks for a password first —
+                worth showing before the tap, not after it. */}
+            {entry.locked && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded-full bg-base-sunken px-1.5 py-0.5 text-[10px] font-semibold text-ink-faint"
+                title="Needs the room password"
+              >
+                <IconLock width={10} height={10} />
+                password
+              </span>
+            )}
           </div>
         </div>
       </button>
