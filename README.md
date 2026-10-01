@@ -113,7 +113,7 @@ Both already work out of the box.
 - No accounts, no email, no tracking. Your name is just text you type in your browser — nothing is stored.
 - Everything lives in server memory and is swept away by a timer. No database to leak.
 - Rooms and messages auto-expire. Old chats don't hang around.
-- The reserved-room password is stored as a salted scrypt hash, never in plain text, and is never sent to a browser. Visitors get a signed access token instead of retyping it.
+- Room passwords are stored as a salted scrypt hash, never in plain text, and are never sent to a browser. Visitors get a signed access token instead of retyping it.
 
 The honest trade-off: it's not for things you need to keep. It's for the here-and-now.
 
@@ -134,8 +134,11 @@ The honest trade-off: it's not for things you need to keep. It's for the here-an
 **Will you save my messages?**
 No. In-memory only, pruned by a timer. Nothing touches a disk database.
 
-**How do I put a password on the reserved room?**
-Admin console → Settings → "Reserved room access". Set a password, and the room behind your fixed code asks for it. Visitors type it once; their device keeps a signed access token, so they aren't asked again until you change the password or revoke access. Changing it, or revoking access, signs every saved device out: their token stops working, so the next join asks again. Wrong guesses are rate limited, and the password is stored only as a hash.
+**How do I put a password on a room?**
+Admin console → Rooms → Access, on any room. Set a password and that room asks for it. Visitors type it once; their device keeps a signed access token, so they aren't asked again until you change the password or revoke access. Changing it, or revoking access, signs every saved device out: their token stops working, so the next join asks again. Wrong guesses are rate limited, and the password is stored only as a hash. Each room has its own password — one room's never opens another.
+
+**What's the difference between a password and "reserved"?**
+A password decides who gets in. Reserved just means the room doesn't expire on its own. You can have either, or both.
 
 **Why did my room vanish?**
 Rooms expire after being quiet for a bit (longer while people are in them). That's the point — it's ephemeral.
