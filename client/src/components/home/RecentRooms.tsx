@@ -18,7 +18,7 @@ interface Props {
 
 /** The display name of a chat, like a contact row in a messenger. */
 function roomName(entry: HistoryEntry): string {
-  if (entry.persistent) return "Your space";
+  if (entry.reserved) return "Your space";
   // When it was last a two-person chat it reads like a direct conversation.
   return entry.lastParticipants <= 2 ? "Private chat" : `Room ${entry.code}`;
 }
@@ -86,7 +86,7 @@ function HistoryRow({
                     : "bg-slate-500/10 text-slate-300"
               }`}
             >
-              {live ? (entry.persistent ? "open" : "active") : status}
+              {live ? (entry.reserved ? "open" : "active") : status}
             </span>
             {/* A locked room still works, it just asks for a password first —
                 worth showing before the tap, not after it. */}

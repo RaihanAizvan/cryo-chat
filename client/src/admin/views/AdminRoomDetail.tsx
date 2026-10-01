@@ -92,7 +92,7 @@ export function AdminRoomDetail({ roomId, onBack }: { roomId: string; onBack: ()
           </button>
           <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-ink">
             {r.code}
-            {r.persistent && <Badge tone="accent">reserved</Badge>}
+            {r.reserved && <Badge tone="accent">reserved</Badge>}
           </h1>
         </div>
         <div className="flex items-center gap-2">
@@ -127,7 +127,7 @@ export function AdminRoomDetail({ roomId, onBack }: { roomId: string; onBack: ()
           <div>
             <div className="text-[11px] uppercase tracking-wider text-ink-faint">Expires</div>
             <div className="mt-0.5 tabular-nums text-ink-muted">
-              {r.persistent ? "never" : fmtExpiry(r.expiresAt)}
+              {r.reserved ? "never" : fmtExpiry(r.expiresAt)}
             </div>
           </div>
           <div>

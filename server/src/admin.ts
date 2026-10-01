@@ -67,9 +67,10 @@ function roomSummary(r: rooms.Room): AdminRoomSummary {
     id: r.id,
     code: r.code,
     createdAt: r.createdAt,
-    expiresAt: r.persistent ? Number.MAX_SAFE_INTEGER : r.expiresAt,
-    persistent: r.persistent,
+    expiresAt: r.reserved ? Number.MAX_SAFE_INTEGER : r.expiresAt,
+    reserved: r.reserved,
     locked: rooms.isLocked(r),
+    passwordExpiresAt: rooms.isLocked(r) ? r.passwordExpiresAt : 0,
     hostId: r.hostParticipantId,
     participantCount: r.participants.size,
     messageCount: r.messages.length,
@@ -367,18 +368,19 @@ export function mountAdminRoutes(app: Express, io: Server): void {
       res.status(404).json({ error: "not_found" });
       return;
     }
-    const password = (req.body as { password?: unknown } | undefined)?.password;
+    const body = req.body as { password?: unknown; passwordExpiresAt?: unknown } | undefined;
+    const password = body?.password;
     if (typeof password !== "string") {
       res.status(400).json({ error: "password_required" });
       return;
     }
-    const result = rooms.setRoomPassword(r, password);
+    const result = rooms.setRoomPassword(r, password, body?.passwordExpiresAt as number | undefined);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;
     }
     audit.record({
-      kind: "reserved:password:set",
+      kind: "room:password:set",
       // The password is deliberately absent from the message and the detail.
       message: rooms.isLocked(r)
         ? `Password set for ${r.code} — anyone without it will be asked`
@@ -403,7 +405,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     }
     rooms.clearRoomPassword(r);
     audit.record({
-      kind: "reserved:password:removed",
+      kind: "room:password:removed",
       message: `Password removed from ${r.code} — the room is open again`,
       actor: "admin",
       roomId: r.id,
@@ -428,7 +430,7 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     }
     rooms.revokeRoomAccess(r);
     audit.record({
-      kind: "reserved:access:revoked",
+      kind: "room:access:revoked",
       message: `Saved access to ${r.code} revoked for every device`,
       actor: "admin",
       roomId: r.id,
@@ -504,10 +506,10 @@ function settingsView(): AdminSettings {
     maxSocketsPerIp: s.maxSocketsPerIp,
     messageRateLimit: s.messageRateLimit,
     messageRateWindowSeconds: Math.round(s.messageRateWindowMs / 1000),
-    reservedRoomCode: s.reservedRoomCode,
-    reservedRoomEnabled: s.reservedRoomEnabled,
-    // The password itself is never exposed — only whether one is set.
     voiceNotesEnabled: s.voiceNotesEnabled,
     adminEnabled: Boolean(config.adminKey),
+    // Env-only: the front-door code names an ordinary room now, so there is
+    // nothing here for an operator to change.
+    specialRoomCode: config.specialRoomCode,
   };
 }

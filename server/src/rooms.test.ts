@@ -4,7 +4,7 @@ import {
   createRoom,
   getRoom,
   getRoomByCode,
-  getOrCreateReservedRoom,
+  getOrCreateSpecialRoom,
   deleteRoom,
   addParticipant,
   participantForSocket,
@@ -20,12 +20,20 @@ import {
   setParticipantLastSeen,
   loadAllRoomsFromStore,
   toPublicRoom,
+  snapshotRoom,
+  restoreRoom,
+  applyRemoteSnapshot,
+  setRoomPassword,
+  clearRoomPassword,
+  setReserved,
+  MIN_PASSWORD_LIFETIME_MS,
+  MAX_PASSWORD_LIFETIME_MS,
   allRooms,
   isExpired,
+  isLocked,
   type Room,
 } from "./rooms";
 import { updateSettings, getSettings } from "./settings";
-import { normalizeReservedCode } from "./settings";
 
 /** Minimal socket stand-in: rooms.ts only touches `.id`. */
 function fakeSocket(id: string): Socket {
@@ -47,27 +55,38 @@ beforeEach(() => {
     messageCap: 200,
     roomTtlMinutes: 120,
     messageTtlMinutes: 1440,
-    reservedRoomCode: normalizeReservedCode("9999"),
-    reservedRoomEnabled: true,
   });
 });
 
 describe("createRoom", () => {
-  it("creates a non-persistent room with the default code & TTL", () => {
+  it("creates a non-reserved room with the default code & TTL", () => {
     const room = createRoom();
-    expect(room.persistent).toBe(false);
+    expect(room.reserved).toBe(false);
     expect(room.code).toMatch(/^\d{4}$/);
     expect(room.expiresAt).toBe(room.createdAt + getSettings().roomTtlMs);
     expect(getRoom(room.id)).toBe(room);
   });
 
-  it("persists when code matches the reserved code", () => {
+  it("is reserved when the code is the front door", () => {
     const room = createRoom({ code: "9999" });
-    expect(room.persistent).toBe(true);
+    expect(room.reserved).toBe(true);
     expect(room.expiresAt).toBe(Number.POSITIVE_INFINITY);
   });
 
-  it("random code never shadows the reserved code", async () => {
+  it("lets the caller reserve any room, independently of its code", () => {
+    const room = createRoom({ reserved: true });
+    expect(room.reserved).toBe(true);
+    expect(room.expiresAt).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("creates a private-capable but public room by default", () => {
+    const room = createRoom();
+    expect(room.passwordHash).toBe("");
+    expect(room.passwordExpiresAt).toBe(0);
+    expect(isLocked(room)).toBe(false);
+  });
+
+  it("random code never shadows the front-door code", async () => {
     const util = await import("./util");
     const spy = vi.spyOn(util, "randomRoomCode").mockReturnValueOnce("9999");
     try {
@@ -104,17 +123,16 @@ describe("getRoom / getRoomByCode / isExpired", () => {
   });
 });
 
-describe("getOrCreateReservedRoom", () => {
-  it("creates the reserved room on demand and reuses it", () => {
-    const a = getOrCreateReservedRoom();
-    expect(a).toBeDefined();
-    expect(a!.persistent).toBe(true);
-    expect(getOrCreateReservedRoom()).toBe(a);
+describe("getOrCreateSpecialRoom", () => {
+  it("creates the front-door room on demand and reuses it", () => {
+    const a = getOrCreateSpecialRoom();
+    expect(a.reserved).toBe(true);
+    expect(getOrCreateSpecialRoom()).toBe(a);
   });
 
-  it("returns undefined when the reserved room feature is disabled", () => {
-    updateSettings({ reservedRoomEnabled: false });
-    expect(getOrCreateReservedRoom()).toBeUndefined();
+  it("is an ordinary room as far as privacy goes", () => {
+    // Reserved says "never expires", not "needs a password".
+    expect(isLocked(getOrCreateSpecialRoom())).toBe(false);
   });
 });
 
@@ -309,16 +327,140 @@ describe("toPublicRoom", () => {
     const hostView = toPublicRoom(room, "sock-host", room.hostParticipantId);
     expect(hostView.isHost).toBe(true);
     expect(hostView.participants).toHaveLength(2);
-    expect(hostView.persistent).toBe(false);
+    expect(hostView.reserved).toBe(false);
     const otherView = toPublicRoom(room, "s2", room.hostParticipantId);
     expect(otherView.isHost).toBe(false);
   });
 
-  it("serializes persistent expiry as MAX_SAFE_INTEGER (no JSON Infinity)", () => {
+  it("serializes reserved expiry as MAX_SAFE_INTEGER (no JSON Infinity)", () => {
     const room = createRoom({ code: "9999" });
     addParticipant(room, fakeSocket("s1"), "p1", "A", 0);
     const view = toPublicRoom(room, "s1", "p1");
-    expect(view.persistent).toBe(true);
+    expect(view.reserved).toBe(true);
     expect(view.expiresAt).toBe(Number.MAX_SAFE_INTEGER);
+  });
+});
+describe("room privacy", () => {
+  it("starts public and has no expiry", () => {
+    const room = createRoom();
+    expect(isLocked(room)).toBe(false);
+    expect(room.passwordExpiresAt).toBe(0);
+    expect(toPublicRoom(room, "sock", room.hostParticipantId).locked).toBe(false);
+  });
+
+  it("locks on a password and unlocks again on removal", () => {
+    const room = createRoom();
+    const set = setRoomPassword(room, "cold brew");
+    expect(set.ok).toBe(true);
+    expect(isLocked(room)).toBe(true);
+    clearRoomPassword(room);
+    expect(isLocked(room)).toBe(false);
+  });
+
+  it("stays locked with no expiry by default", () => {
+    const room = createRoom();
+    setRoomPassword(room, "cold brew");
+    expect(room.passwordExpiresAt).toBe(0);
+    expect(isLocked(room)).toBe(true);
+  });
+
+  it("reopens when the expiry passes, instead of locking everyone out", () => {
+    const room = createRoom();
+    setRoomPassword(room, "cold brew", Date.now() + 60_000);
+    expect(isLocked(room)).toBe(true);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 120_000);
+      expect(isLocked(room)).toBe(false);
+      // The hash is kept, so the audit trail still explains why the room opened.
+      expect(room.passwordHash).not.toBe("");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clamps an expiry in the past into the future", () => {
+    const room = createRoom();
+    const before = Date.now();
+    setRoomPassword(room, "cold brew", 1);
+    expect(room.passwordExpiresAt).toBeGreaterThanOrEqual(before + MIN_PASSWORD_LIFETIME_MS);
+  });
+
+  it("clamps a far-future expiry down to the ceiling", () => {
+    const room = createRoom();
+    const now = Date.now();
+    setRoomPassword(room, "cold brew", now + MAX_PASSWORD_LIFETIME_MS * 100);
+    expect(room.passwordExpiresAt).toBeLessThanOrEqual(now + MAX_PASSWORD_LIFETIME_MS + 1000);
+  });
+
+  it("rejects a password that is too short or too long, leaving the room as it was", () => {
+    const room = createRoom();
+    expect(setRoomPassword(room, "ab").ok).toBe(false);
+    expect(setRoomPassword(room, "x".repeat(500)).ok).toBe(false);
+    expect(isLocked(room)).toBe(false);
+  });
+
+  it("never exposes the password or its expiry to a public room view", () => {
+    const room = createRoom();
+    addParticipant(room, fakeSocket("s1"), "p1", "A", 0);
+    setRoomPassword(room, "cold brew", Date.now() + 86_400_000);
+    const view = toPublicRoom(room, "s1", "p1");
+    expect(view.locked).toBe(true);
+    expect(view.passwordExpiresAt).toBeGreaterThan(Date.now());
+    expect(JSON.stringify(view)).not.toContain("scrypt");
+  });
+
+  it("reports no expiry on the public view of a public room", () => {
+    const room = createRoom();
+    addParticipant(room, fakeSocket("s1"), "p1", "A", 0);
+    setRoomPassword(room, "cold brew", Date.now() + 86_400_000);
+    clearRoomPassword(room);
+    expect(toPublicRoom(room, "s1", "p1").passwordExpiresAt).toBe(0);
+  });
+
+  it("keeps reserved and locked independent", () => {
+    const room = createRoom();
+    setReserved(room, true);
+    expect(room.reserved).toBe(true);
+    expect(isLocked(room)).toBe(false);
+
+    const other = createRoom();
+    setRoomPassword(other, "cold brew");
+    expect(other.reserved).toBe(false);
+    expect(isLocked(other)).toBe(true);
+  });
+
+  it("carries the expiry through a snapshot round trip", () => {
+    const room = createRoom();
+    const expires = Date.now() + 86_400_000;
+    setRoomPassword(room, "cold brew", expires);
+    const back = restoreRoom(snapshotRoom(room));
+    expect(back.passwordHash).toBe(room.passwordHash);
+    expect(back.passwordExpiresAt).toBe(room.passwordExpiresAt);
+    expect(isLocked(back)).toBe(true);
+  });
+
+  it("does not let a stale snapshot reopen a room that was just locked", () => {
+    const room = createRoom();
+    // A snapshot taken while the room was still public.
+    const stale = snapshotRoom(room);
+    const versionBefore = room.passwordVersion;
+    setRoomPassword(room, "cold brew", Date.now() + 86_400_000);
+    expect(room.passwordVersion).toBeGreaterThan(versionBefore);
+
+    // Replaying the old snapshot must not undo the lock.
+    applyRemoteSnapshot(room, stale);
+    expect(isLocked(room)).toBe(true);
+    expect(room.passwordExpiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it("does not let a stale snapshot resurrect an old expiry", () => {
+    const room = createRoom();
+    setRoomPassword(room, "cold brew", Date.now() + 86_400_000);
+    const stale = snapshotRoom({ ...room, passwordExpiresAt: 0, passwordVersion: 1 });
+    // Clear then replay: the snapshot is older, so it must not win.
+    clearRoomPassword(room);
+    applyRemoteSnapshot(room, stale);
+    expect(isLocked(room)).toBe(false);
   });
 });

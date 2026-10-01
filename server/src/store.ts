@@ -101,6 +101,12 @@ export interface Store {
 
   /** Sliding-window check. Returns true when the call is allowed. */
   rateLimit(key: string, limit: number, windowMs: number): Promise<boolean>;
+  /** As `rateLimit`, but also reports the seconds left on the window. */
+  rateLimitWithRetry(
+    key: string,
+    limit: number,
+    windowMs: number,
+  ): Promise<{ allowed: boolean; retryAfterSeconds: number }>;
 
   /**
    * Atomically reserve `code` for `roomId`. False when the code is already
@@ -157,15 +163,31 @@ class MemoryStore implements Store {
   async publishRoom(): Promise<void> {}
   private buckets = new Map<string, { count: number; resetAt: number }>();
   async rateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
+    const { allowed } = await this.rateLimitWithRetry(key, limit, windowMs);
+    return allowed;
+  }
+
+  /**
+   * Same check, but also reports how long is left on the window so a throttled
+   * caller can be told when to come back instead of being left to guess. A
+   * bare boolean makes the client show a dead prompt with no way forward.
+   */
+  async rateLimitWithRetry(
+    key: string,
+    limit: number,
+    windowMs: number,
+  ): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
     const now = Date.now();
     const b = this.buckets.get(key);
     if (!b || now >= b.resetAt) {
       this.buckets.set(key, { count: 1, resetAt: now + windowMs });
-      return true;
+      return { allowed: true, retryAfterSeconds: 0 };
     }
-    if (b.count >= limit) return false;
+    if (b.count >= limit) {
+      return { allowed: false, retryAfterSeconds: Math.ceil((b.resetAt - now) / 1000) };
+    }
     b.count += 1;
-    return true;
+    return { allowed: true, retryAfterSeconds: 0 };
   }
 
   async claimCode(): Promise<boolean> {
@@ -405,15 +427,16 @@ class RedisStore implements Store {
     ]);
     // A stale index entry (room expired, keys gone) is simply skipped.
     if (!meta || !meta.code) return null;
-    const persistent = meta.persistent === "1";
+    const reserved = meta.reserved === "1";
     return {
       id,
       code: meta.code,
       hostParticipantId: meta.host ?? "",
       createdAt: Number(meta.createdAt ?? 0),
-      expiresAt: persistent ? 0 : Number(meta.expiresAt ?? 0),
-      persistent,
+      expiresAt: reserved ? 0 : Number(meta.expiresAt ?? 0),
+      reserved,
       passwordHash: meta.passwordHash ?? "",
+      passwordExpiresAt: Number(meta.passwordExpiresAt ?? 0),
       passwordVersion: Number(meta.passwordVersion ?? 1),
       participants: Object.values(people).map((j) => JSON.parse(j)),
       messages: messages.map((j) => JSON.parse(j)),
@@ -447,7 +470,7 @@ class RedisStore implements Store {
   async saveRoom(room: RoomSnapshot): Promise<void> {
     const id = room.id;
     const ttl =
-      room.persistent || !Number.isFinite(room.expiresAt)
+      room.reserved || !Number.isFinite(room.expiresAt)
         ? 0
         : Math.max(1, Math.floor((room.expiresAt - Date.now()) / 1000));
     const tx = this.cmd
@@ -457,12 +480,13 @@ class RedisStore implements Store {
         host: room.hostParticipantId,
         createdAt: String(room.createdAt),
         expiresAt: String(room.expiresAt),
-        persistent: room.persistent ? "1" : "0",
+        reserved: room.reserved ? "1" : "0",
         // The room's own password hash and access version. Without these a
         // locked room would come back open after a restart or on whichever
         // instance has to hydrate it first.
         passwordHash: room.passwordHash ?? "",
         passwordVersion: String(room.passwordVersion ?? 1),
+        passwordExpiresAt: String(room.passwordExpiresAt ?? 0),
       })
       .del(this.roomPeople(id))
       .sadd(`${this.p}:rooms`, id)
@@ -526,6 +550,15 @@ class RedisStore implements Store {
   }
 
   async rateLimit(key: string, limit: number, windowMs: number): Promise<boolean> {
+    const { allowed } = await this.rateLimitWithRetry(key, limit, windowMs);
+    return allowed;
+  }
+
+  async rateLimitWithRetry(
+    key: string,
+    limit: number,
+    windowMs: number,
+  ): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
     const member = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const res = await this.cmd.eval(
       RATE_SCRIPT,
@@ -536,7 +569,13 @@ class RedisStore implements Store {
       String(limit),
       member,
     );
-    return Number(res) === 1;
+    if (Number(res) === 1) return { allowed: true, retryAfterSeconds: 0 };
+    // The window's own TTL is the honest answer: how long until the oldest hit
+    // ages out of the sorted set.
+    const pttl = Number(await this.cmd.pttl(`${this.p}:rl:${key}`));
+    const retryAfterSeconds =
+      Number.isFinite(pttl) && pttl > 0 ? Math.ceil(pttl / 1000) : Math.ceil(windowMs / 1000);
+    return { allowed: false, retryAfterSeconds };
   }
 
   async claimCode(code: string, roomId: string): Promise<boolean> {

@@ -1,8 +1,8 @@
 /**
- * Reserved-room access control.
+ * Room access control.
  *
- * The reserved room is protected by a password instead of by its 4-character
- * code. This module owns the two pieces of crypto that need:
+ * A private room is protected by a password instead of by its 4-character code.
+ * This module owns the two pieces of crypto that need:
  *
  *  - **Password hashing.** Only a salted scrypt hash is ever stored, so a
  *    settings dump (or a Redis snapshot) never hands over the password. The
@@ -19,10 +19,11 @@
  * construction — no cleanup job can forget to run.
  *
  * Every room carries its own password hash and version, so this module is
- * room-scoped throughout: two rooms never share a password or a key.
+ * room-scoped throughout: two rooms never share a password or a key. A room
+ * with no hash is public and skips this module entirely.
  *
  * A token is bound to the anonymous identity that unlocked it, expires on its
- * own, and carries the access "version" so the admin can revoke access without
+ * own, and carries the access "version" so the host can revoke access without
  * rotating the password.
  */
 
@@ -37,6 +38,8 @@ export interface PasswordRoom {
   code: string;
   passwordHash: string;
   passwordVersion: number;
+  /** Epoch ms the password lapses, or 0 for "never". */
+  passwordExpiresAt: number;
 }
 
 /** How long an unlocked device stays unlocked. */
@@ -189,6 +192,12 @@ export type EntryDecision = "open" | "granted" | "invalid" | "required";
  * token are whatever arrived with the request. A correct password or a valid
  * token both grant entry, and a token additionally returns a fresh one so an
  * old device keeps its access alive as long as it keeps using it.
+ *
+ * An expired password is treated as no password at all. The alternative —
+ * honouring it forever — means a room nobody remembers locking stays locked,
+ * and refusing entry entirely means a room can become permanently unreachable
+ * because no one renewed it. The host is told in-band when this happens (see
+ * the `password_expired` system pill) so reopening is never silent.
  */
 export function decideEntry(
   room: PasswordRoom,
@@ -196,7 +205,7 @@ export function decideEntry(
   password: unknown,
   token: unknown,
 ): EntryDecision {
-  if (!room.passwordHash) return "open";
+  if (!isRoomLocked(room)) return "open";
   if (verifyAccessToken(token, room, sessionId)) return "granted";
   if (typeof password === "string" && password.length > 0) {
     return verifyRoomPassword(room, password) ? "granted" : "invalid";
@@ -204,7 +213,17 @@ export function decideEntry(
   return "required";
 }
 
-/** Whether a room needs a password right now (cheap read for the UI). */
-export function isRoomLocked(room: PasswordRoom): boolean {
-  return room.passwordHash !== "";
+/** False once `passwordExpiresAt` has passed. A zero expiry never lapses. */
+export function isPasswordInForce(room: Pick<PasswordRoom, "passwordExpiresAt">): boolean {
+  return room.passwordExpiresAt === 0 || room.passwordExpiresAt > Date.now();
+}
+
+/**
+ * Whether a room needs a password right now (cheap read for the UI and the join
+ * gate). A hash that has expired is not counted, so the room reads as public.
+ */
+export function isRoomLocked(
+  room: Pick<PasswordRoom, "passwordHash" | "passwordExpiresAt">,
+): boolean {
+  return room.passwordHash !== "" && isPasswordInForce(room);
 }

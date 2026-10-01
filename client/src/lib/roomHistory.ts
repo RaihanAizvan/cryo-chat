@@ -34,7 +34,7 @@ export interface HistoryEntry {
   lastParticipants: number;
   isHost: boolean;
   /** True for the preserved special room: never auto-expires. */
-  persistent: boolean;
+  reserved: boolean;
   /** True once the room is known to be closed (not just expired). */
   closed: boolean;
   /** True when the room needs a password (reserved room, per the server). */
@@ -71,10 +71,10 @@ class RoomHistoryStore {
       createdAt: idx >= 0 ? this.entries[idx].createdAt : room.createdAt,
       lastVisitedAt: at,
       // Persistent rooms never expire; a far-future sentinel keeps them "live".
-      expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+      expiresAt: room.reserved ? Number.MAX_SAFE_INTEGER : room.expiresAt,
       lastParticipants: room.participants.length,
       isHost: meta.isHost,
-      persistent: room.persistent,
+      reserved: room.reserved,
       closed: false,
       // Preserved across reloads; the status poll keeps it fresh.
       locked: idx >= 0 ? this.entries[idx].locked : false,
@@ -97,8 +97,8 @@ class RoomHistoryStore {
       ...e,
       lastVisitedAt: Date.now(),
       lastParticipants: participantCount,
-      expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
-      persistent: room.persistent,
+      expiresAt: room.reserved ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+      reserved: room.reserved,
       closed: false,
       locked: this.entries[idx].locked,
     };
@@ -121,10 +121,10 @@ class RoomHistoryStore {
         lastParticipants: st.exists ? st.participantCount : e.lastParticipants,
         closed: !st.exists,
         locked: st.exists ? !!st.locked : e.locked,
-        // A persistent room is never considered expired (stays "always open"),
+        // A reserved room is never considered expired (stays "always open"),
         // but it IS closed when the server reports it gone.
         expiresAt: st.exists
-          ? st.persistent
+          ? st.reserved
             ? Number.MAX_SAFE_INTEGER
             : st.expiresAt
           : Date.now(),

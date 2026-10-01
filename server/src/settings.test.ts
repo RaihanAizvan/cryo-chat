@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { MAX_MESSAGE_LENGTH } from "@cryo/shared";
-import { getSettings, updateSettings, isReservedCode, maxMessageLength, normalizeReservedCode } from "./settings";
+import { getSettings, updateSettings, isSpecialCode, maxMessageLength, specialRoomCode } from "./settings";
 
 /**
  * Settings module keeps singleton state (`current`). To keep tests isolated we
@@ -16,8 +16,6 @@ function resetToDefaults() {
     maxSocketsPerIp: 20,
     messageRateLimit: 10,
     messageRateWindowSeconds: 10,
-    reservedRoomCode: "9999",
-    reservedRoomEnabled: true,
     voiceNotesEnabled: true,
   });
 }
@@ -56,19 +54,20 @@ describe("updateSettings", () => {
     if (r.ok) expect(r.settings.roomTtlMs).toBe(7 * 24 * 60 * 60_000);
   });
 
-  it("guards a reserved room code to exactly 4 alphanumerics", () => {
-    expect(updateSettings({ reservedRoomCode: "abc" }).ok).toBe(false);
-    expect(updateSettings({ reservedRoomCode: "ABCDE" }).ok).toBe(false);
-    expect(updateSettings({ reservedRoomCode: "12345" }).ok).toBe(false);
-    const ok = updateSettings({ reservedRoomCode: "cafe" });
-    expect(ok.ok).toBe(true);
-    if (ok.ok) expect(ok.settings.reservedRoomCode).toBe("CAFE");
-  });
-
   it("rejects non-boolean toggles", () => {
-    expect(updateSettings({ reservedRoomEnabled: 1 }).ok).toBe(false);
     expect(updateSettings({ voiceNotesEnabled: "yes" }).ok).toBe(false);
     expect(updateSettings({ voiceNotesEnabled: 1 }).ok).toBe(false);
+  });
+
+  it("no longer accepts the old reserved-room settings", () => {
+    // They were removed with the concept: the front-door code is env-only now,
+    // and every other room can carry a password.
+    const r = updateSettings({ reservedRoomCode: "cafe" } as never);
+    expect(r.ok).toBe(true);
+    expect(r).toMatchObject({ ok: true });
+    const settings = (r as unknown as { settings: Record<string, unknown> }).settings;
+    expect(settings).not.toHaveProperty("reservedRoomCode");
+    expect(settings).not.toHaveProperty("reservedRoomEnabled");
   });
 
   it("voiceNotesEnabled round-trips through update", () => {
@@ -85,9 +84,9 @@ describe("updateSettings", () => {
   });
 
   it("accumulates multiple validation errors and rejects the patch atomically", () => {
-    const r = updateSettings({ reservedRoomCode: "xyz", voiceNotesEnabled: "nope" });
+    const r = updateSettings({ maxRoomSize: "big", messageCap: "many", voiceNotesEnabled: "nope" });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain("Reserved code");
+    if (!r.ok) expect(r.error).toContain("voiceNotesEnabled");
   });
 
   it("leaves values unchanged when patch keys are absent", () => {
@@ -100,34 +99,21 @@ describe("updateSettings", () => {
   });
 });
 
-describe("getSettings / isReservedCode / maxMessageLength", () => {
-  it("matches the reserved code (exact, stored uppercase) when enabled", () => {
-    updateSettings({ reservedRoomCode: "cafe", reservedRoomEnabled: true });
-    expect(isReservedCode("CAFE")).toBe(true);
-    expect(isReservedCode("cafe")).toBe(false); // stored uppercase, exact match
-    expect(isReservedCode("CAF2")).toBe(false);
+describe("getSettings / isSpecialCode / maxMessageLength", () => {
+  it("matches the front-door code exactly", () => {
+    expect(isSpecialCode(specialRoomCode())).toBe(true);
+    expect(isSpecialCode("CAF2")).toBe(false);
   });
 
-  it("ignores the reserved code when disabled", () => {
-    updateSettings({ reservedRoomCode: "cafe", reservedRoomEnabled: false });
-    expect(isReservedCode("CAFE")).toBe(false);
+  it("cannot be switched off at run time", () => {
+    // There is no toggle any more: the code names an ordinary room, so there is
+    // nothing for an operator to disable.
+    expect(() => updateSettings({ reservedRoomEnabled: false } as never)).not.toThrow();
+    expect(isSpecialCode(specialRoomCode())).toBe(true);
   });
 
   it("maxMessageLength respects admin clamping", () => {
     updateSettings({ maxMessageLength: 500 });
     expect(maxMessageLength()).toBe(500);
-  });
-});
-
-describe("normalizeReservedCode", () => {
-  it("sanitizes a raw 4-char input", () => {
-    expect(normalizeReservedCode(" ab-12 ")).toBe("AB12");
-    expect(normalizeReservedCode("cafe")).toBe("CAFE");
-  });
-
-  it("falls back to config default on garbage", () => {
-    expect(normalizeReservedCode("ab")).toBe(getSettings().reservedRoomCode);
-    expect(normalizeReservedCode("toolong11")).toBe(getSettings().reservedRoomCode);
-    expect(normalizeReservedCode(null)).toBe(getSettings().reservedRoomCode);
   });
 });

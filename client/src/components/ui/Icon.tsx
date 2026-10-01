@@ -269,6 +269,13 @@ export const IconLock = (p: P) => (
   </svg>
 );
 
+export const IconUnlock = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="11" width="16" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 7.5-2" />
+  </svg>
+);
+
 export const IconLogOut = (p: P) => (
   <svg {...base} {...p}>
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />

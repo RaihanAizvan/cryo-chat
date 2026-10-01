@@ -18,8 +18,8 @@ import type {
   MessageReply,
 } from "@cryo/shared";
 import { randomRoomCode, randomRoomId } from "./util.js";
-import { getSettings, isReservedCode } from "./settings.js";
-import { hashPassword } from "./reserved.js";
+import { getSettings, isSpecialCode, specialRoomCode } from "./settings.js";
+import { hashPassword, isPasswordInForce, isRoomLocked } from "./reserved.js";
 import { store } from "./store.js";
 import type { RoomEventEnvelope } from "./store.js";
 import { redisMode } from "./store.js";
@@ -45,10 +45,10 @@ export interface Room {
   hostParticipantId: string;
   createdAt: number;
   expiresAt: number;
-  /** True for the special room: never auto-expires, closed only manually. */
-  persistent: boolean;
+  /** Admin-owned: a reserved room never auto-expires. Unrelated to privacy. */
+  reserved: boolean;
   /**
-   * Salted scrypt hash of this room's password, or "" when the room is open.
+   * Salted scrypt hash of this room's password, or "" when the room is public.
    * Every room has its own — there is no shared password. The hash is never
    * sent to a client; it doubles as the signing key for this room's access
    * tokens, so rotating it invalidates every token handed out so far.
@@ -56,6 +56,12 @@ export interface Room {
   passwordHash: string;
   /** Bumped to revoke access without rotating the password. */
   passwordVersion: number;
+  /**
+   * Epoch ms after which the password stops being honoured, or 0 for "never".
+   * A room with a non-empty `passwordHash` past this point falls back to public
+   * rather than locking everyone out — see `passwordInForce`.
+   */
+  passwordExpiresAt: number;
   /** Map of participant nonce -> participant. */
   participants: Map<string, Participant>;
   /** Map of socket.id -> participant nonce. */
@@ -66,7 +72,7 @@ export interface Room {
 
 /**
  * A JSON-safe copy of a room, used to persist to Redis and to ship to other
- * instances. `persistent` rooms serialize `expiresAt` as 0 because JSON has no
+ * instances. `reserved` rooms serialize `expiresAt` as 0 because JSON has no
  * Infinity (same trick the public room view uses).
  *
  * Older snapshots predate per-room passwords; the missing fields are treated as
@@ -79,9 +85,10 @@ export interface RoomSnapshot {
   hostParticipantId: string;
   createdAt: number;
   expiresAt: number;
-  persistent: boolean;
+  reserved: boolean;
   passwordHash?: string;
   passwordVersion?: number;
+  passwordExpiresAt?: number;
   participants: Participant[];
   messages: InternalMessage[];
 }
@@ -98,6 +105,8 @@ export interface CreateRoomOptions {
   code?: string;
   /** Set false so a caller can claim the code in the store before persisting. */
   persist?: boolean;
+  /** Never auto-expire. Defaults to true for the front-door code only. */
+  reserved?: boolean;
 }
 
 /** Create a new room and return it. The host participant is added by caller. */
@@ -105,28 +114,29 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
   const now = Date.now();
   const settings = getSettings();
   const id = randomRoomId();
-  const persistent = Boolean(
-    options.code && isReservedCode(options.code),
-  );
+  // The front door is reserved so it cannot quietly expire out from under the
+  // people who type its code. Everything else is created ordinary.
+  const reserved = options.reserved ?? Boolean(options.code && isSpecialCode(options.code));
   const room: Room = {
     id,
     code: options.code ?? randomRoomCode(),
     hostParticipantId: "",
     createdAt: now,
-    expiresAt: persistent ? Number.POSITIVE_INFINITY : now + settings.roomTtlMs,
-    persistent,
+    expiresAt: reserved ? Number.POSITIVE_INFINITY : now + settings.roomTtlMs,
+    reserved,
     passwordHash: "",
     passwordVersion: 1,
+    passwordExpiresAt: 0,
     participants: new Map(),
     sockets: new Map(),
     messages: [],
   };
   // Guard against a (vanishingly rare) id collision.
   while (rooms.has(room.id)) room.id = randomRoomId();
-  // A random code must never shadow the preserved reserved code, and two live
+  // A random code must never shadow the front-door code, and two live
   // rooms must not share a code (the join path resolves by code).
   if (!options.code) {
-    while (isReservedCode(room.code) || codeIndex.has(room.code)) {
+    while (isSpecialCode(room.code) || codeIndex.has(room.code)) {
       room.code = randomRoomCode();
     }
   }
@@ -140,20 +150,40 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
 export const MIN_ROOM_PASSWORD_LENGTH = 4;
 /** Longest accepted password, so pasting a whole document cannot wedge it. */
 export const MAX_ROOM_PASSWORD_LENGTH = 128;
+/** Upper bound on a host-chosen password lifetime. */
+export const MAX_PASSWORD_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+/** Floor, so a password can never be created already lapsed. */
+export const MIN_PASSWORD_LIFETIME_MS = 60_000;
 
-/** True when this room needs a password to enter. */
-export function isLocked(room: Pick<Room, "passwordHash">): boolean {
-  return room.passwordHash !== "";
+/**
+ * True when this room is actually private right now.
+ *
+ * Delegates to the access-control module so there is exactly one definition of
+ * "locked" — the join gate and the UI must not be able to disagree about it.
+ */
+export function isLocked(room: Pick<Room, "passwordHash" | "passwordExpiresAt">): boolean {
+  return isRoomLocked(room);
+}
+
+/** False once `passwordExpiresAt` has passed. A zero expiry never lapses. */
+export function passwordInForce(room: Pick<Room, "passwordExpiresAt">): boolean {
+  return isPasswordInForce(room);
 }
 
 /**
  * Set or change this room's password. Stores only a hash, and bumps the access
  * version, which is what invalidates every token issued under the old password
  * (they are signed with a key derived from the hash).
+ *
+ * `expiresAt` is the host's choice: an epoch ms, or 0 / undefined for "never".
+ * Not calling this does not evict anyone already seated — a password governs
+ * who may enter next, which is the only thing a password can meaningfully do
+ * after the fact.
  */
 export function setRoomPassword(
   room: Room,
   password: string,
+  expiresAt?: number,
 ): { ok: true } | { ok: false; error: string } {
   const clean = password.normalize("NFKC").trim();
   if (clean.length < MIN_ROOM_PASSWORD_LENGTH) {
@@ -164,14 +194,28 @@ export function setRoomPassword(
   }
   room.passwordHash = hashPassword(clean);
   room.passwordVersion += 1;
+  room.passwordExpiresAt = normalizePasswordExpiry(expiresAt);
   persistRoom(room);
   return { ok: true };
+}
+
+/** Clamp a requested expiry into a sane future window, or 0 for "never". */
+function normalizePasswordExpiry(raw: unknown): number {
+  if (raw === undefined || raw === null || raw === 0) return 0;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  // Clamped at BOTH ends on purpose. A client with a wrong clock must not be
+  // able to publish an open room by asking for an expiry that has already
+  // passed, and no host should be able to set a password that lapses instantly.
+  const now = Date.now();
+  return Math.min(Math.max(ms, now + MIN_PASSWORD_LIFETIME_MS), now + MAX_PASSWORD_LIFETIME_MS);
 }
 
 /** Remove the password: the room goes back to being open to anyone with the code. */
 export function clearRoomPassword(room: Room): void {
   room.passwordHash = "";
   room.passwordVersion += 1;
+  room.passwordExpiresAt = 0;
   persistRoom(room);
 }
 
@@ -186,11 +230,13 @@ export function revokeRoomAccess(room: Room): void {
 
 /**
  * Mark a room reserved. Reserved rooms never auto-expire, so they survive being
- * left alone — and they are the ones a password is expected on.
+ * left alone. This is an operator decision and is independent of privacy: a
+ * room can be reserved without a password, or have a password without being
+ * reserved.
  */
 export function setReserved(room: Room, reserved: boolean): void {
-  if (room.persistent === reserved) return;
-  room.persistent = reserved;
+  if (room.reserved === reserved) return;
+  room.reserved = reserved;
   // Reserving a room that has already timed out would be pointless, so give it
   // a fresh long life; un-reserving hands it back to the normal TTL.
   room.expiresAt = reserved ? Number.POSITIVE_INFINITY : Date.now() + getSettings().roomTtlMs;
@@ -204,10 +250,11 @@ export function snapshotRoom(room: Room): RoomSnapshot {
     code: room.code,
     hostParticipantId: room.hostParticipantId,
     createdAt: room.createdAt,
-    expiresAt: room.persistent ? 0 : room.expiresAt,
-    persistent: room.persistent,
+    expiresAt: room.reserved ? 0 : room.expiresAt,
+    reserved: room.reserved,
     passwordHash: room.passwordHash,
     passwordVersion: room.passwordVersion,
+    passwordExpiresAt: room.passwordExpiresAt,
     participants: [...room.participants.values()].map((p) => ({ ...p })),
     messages: room.messages.map((m) => ({ ...m })),
   };
@@ -220,10 +267,11 @@ export function restoreRoom(snapshot: RoomSnapshot): Room {
     code: snapshot.code,
     hostParticipantId: snapshot.hostParticipantId,
     createdAt: snapshot.createdAt,
-    expiresAt: snapshot.persistent ? Number.POSITIVE_INFINITY : snapshot.expiresAt,
-    persistent: snapshot.persistent,
+    expiresAt: snapshot.reserved ? Number.POSITIVE_INFINITY : snapshot.expiresAt,
+    reserved: snapshot.reserved,
     passwordHash: snapshot.passwordHash ?? "",
     passwordVersion: snapshot.passwordVersion ?? 1,
+    passwordExpiresAt: snapshot.passwordExpiresAt ?? 0,
     participants: new Map(snapshot.participants.map((p) => [p.id, { ...p }])),
     sockets: new Map(),
     messages: snapshot.messages.map((m) => ({ ...m })),
@@ -256,12 +304,10 @@ export function getRoomByCode(code: string): Room | undefined {
  * always available — anyone who knows it can jump back in. Returns undefined
  * when the reserved room is disabled in settings.
  */
-export function getOrCreateReservedRoom(): Room | undefined {
-  const settings = getSettings();
-  if (!settings.reservedRoomEnabled) return undefined;
-  const existing = getRoomByCode(settings.reservedRoomCode);
+export function getOrCreateSpecialRoom(): Room {
+  const existing = getRoomByCode(specialRoomCode());
   if (existing) return existing;
-  return createRoom({ code: settings.reservedRoomCode });
+  return createRoom({ code: specialRoomCode() });
 }
 
 export function deleteRoom(id: string): boolean {
@@ -474,11 +520,13 @@ export function toPublicRoom(room: Room, socketId: string, hostParticipantId: st
     id: room.id,
     code: room.code,
     createdAt: room.createdAt,
-    // Persistent rooms never auto-expire; serialize a far-future number since
+    // Reserved rooms never auto-expire; serialize a far-future number since
     // JSON cannot carry Infinity (it would arrive as null on the client).
-    expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+    expiresAt: room.reserved ? Number.MAX_SAFE_INTEGER : room.expiresAt,
     isHost: pid === hostParticipantId,
-    persistent: room.persistent,
+    reserved: room.reserved,
+    locked: isLocked(room),
+    passwordExpiresAt: isLocked(room) ? room.passwordExpiresAt : 0,
     participants: [...room.participants.values()].map((p) => ({
       id: p.id,
       name: p.name,
@@ -509,7 +557,7 @@ export function isExpired(room: Room): boolean {
 
 /** Remaining room lifetime in seconds for the message list TTL (0 = forever). */
 function ttlSeconds(room: Room): number {
-  if (room.persistent || !Number.isFinite(room.expiresAt)) return 0;
+  if (room.reserved || !Number.isFinite(room.expiresAt)) return 0;
   return Math.max(1, Math.floor((room.expiresAt - Date.now()) / 1000));
 }
 
@@ -549,12 +597,12 @@ function capMessages(room: Room): void {
  * socket mappings from `room.sockets` first, so the keeping-loop has nothing
  * to restore and the authoritative removal snapshot stays authoritative.
  */
-function applySnapshot(room: Room, snap: RoomSnapshot): void {
+export function applyRemoteSnapshot(room: Room, snap: RoomSnapshot): void {
   room.code = snap.code;
   room.hostParticipantId = snap.hostParticipantId;
   room.createdAt = snap.createdAt;
-  room.expiresAt = snap.persistent ? Number.POSITIVE_INFINITY : snap.expiresAt;
-  room.persistent = snap.persistent;
+  room.expiresAt = snap.reserved ? Number.POSITIVE_INFINITY : snap.expiresAt;
+  room.reserved = snap.reserved;
   // Take the authoritative password fields from the snapshot: an access token
   // is checked against them, so a stale local hash would lock people out (or
   // let them in with a rotated password). Every change to them bumps the
@@ -564,6 +612,10 @@ function applySnapshot(room: Room, snap: RoomSnapshot): void {
   if (version >= room.passwordVersion) {
     room.passwordHash = snap.passwordHash ?? "";
     room.passwordVersion = version;
+    // The expiry rides along with the hash it belongs to, so it must only be
+    // taken from the same snapshot that won the version check — otherwise a
+    // stale "never expires" could outlive the password it was set for.
+    room.passwordExpiresAt = snap.passwordExpiresAt ?? 0;
   }
   const next = new Map(snap.participants.map((p) => [p.id, { ...p }]));
   for (const [, pid] of room.sockets) {
@@ -587,7 +639,7 @@ function applyRemoteRoom(event: RoomEventEnvelope): void {
     case "snapshot": {
       const room = rooms.get(event.room.id);
       // Only track rooms this instance actually has members in.
-      if (room) applySnapshot(room, event.room);
+      if (room) applyRemoteSnapshot(room, event.room);
       return;
     }
     case "message": {
@@ -635,7 +687,7 @@ store.on("room", applyRemoteRoom);
 function hydrateRoom(snapshot: RoomSnapshot): Room {
   const existing = rooms.get(snapshot.id);
   if (existing) {
-    applySnapshot(existing, snapshot);
+    applyRemoteSnapshot(existing, snapshot);
     return existing;
   }
   const room = restoreRoom(snapshot);
@@ -695,15 +747,13 @@ export async function createRoomClaimed(options: CreateRoomOptions = {}): Promis
  * Reserved room, deduped across instances: whoever claims the code first wins
  * and every other instance hydrates that same room.
  */
-export async function getOrCreateReservedRoomClaimed(): Promise<Room | undefined> {
-  const settings = getSettings();
-  if (!settings.reservedRoomEnabled) return undefined;
-  const existing = await loadRoomByCodeFromStore(settings.reservedRoomCode);
+export async function getOrCreateSpecialRoomClaimed(): Promise<Room | undefined> {
+  const existing = await loadRoomByCodeFromStore(specialRoomCode());
   if (existing) return existing;
-  const created = await createRoomClaimed({ code: settings.reservedRoomCode });
+  const created = await createRoomClaimed({ code: specialRoomCode() });
   if (created) return created;
   // Lost a race: the winner's room is now in the store.
-  return loadRoomByCodeFromStore(settings.reservedRoomCode);
+  return loadRoomByCodeFromStore(specialRoomCode());
 }
 
 /** Remove a participant from the local room state (maps + host reassignment)

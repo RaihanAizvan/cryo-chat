@@ -122,7 +122,6 @@ interface AdminSettingsView {
   voiceNotesEnabled?: boolean;
   maxRoomSize?: number;
   reservedRoomCode?: string;
-  reservedRoomPasswordSet?: boolean;
 }
 type AdminBody = Record<string, unknown> & { settings?: AdminSettingsView };
 let handle: ServerHandle;
@@ -260,9 +259,20 @@ runIntegration("admin REST API on the production bundle", () => {
     expect(Array.isArray(analytics.body.buckets)).toBe(true);
   });
 
-  it("rejects an invalid reserved room code", async () => {
-    const bad = await admin("/settings", { method: "PUT", body: { reservedRoomCode: "abc" } });
-    expect(bad.status).toBe(400);
+  it("ignores the retired reserved-room settings", async () => {
+    // The code is env-only now, so a patch naming it is simply not a setting.
+    const stale = await admin("/settings", { method: "PUT", body: { reservedRoomCode: "cafe" } });
+    expect(stale.status).toBe(200);
+    const after = await admin("/settings");
+    expect(after.body.settings).not.toHaveProperty("reservedRoomCode");
+  });
+
+  it("refuses to take a password through the generic settings patch", async () => {
+    const sneaky = await admin("/settings", {
+      method: "PUT",
+      body: { reservedRoomPassword: "scrypt$1$2" },
+    });
+    expect(sneaky.status).toBe(400);
   });
 
   it("clamps nonsensical numeric settings instead of erroring", async () => {
@@ -606,11 +616,11 @@ runIntegration("room passwords on the production bundle", () => {
   it("lets an admin mark any room reserved, from the rooms list", async () => {
     await withLockedRoom(async ({ admin: adminLocal, roomId }) => {
       const listed = await adminLocal("/rooms");
-      const rooms = listed.body.rooms as { id: string; locked: boolean; persistent: boolean }[];
+      const rooms = listed.body.rooms as { id: string; locked: boolean; reserved: boolean }[];
       const row = rooms.find((r) => r.id === roomId);
       expect(row).toBeDefined();
       expect(row!.locked).toBe(true);
-      expect(row!.persistent).toBe(false);
+      expect(row!.reserved).toBe(false);
 
       // Reserved means it will not expire on its own.
       const marked = await adminLocal(`/rooms/${roomId}`, {
@@ -618,7 +628,7 @@ runIntegration("room passwords on the production bundle", () => {
         body: { reserved: true },
       });
       expect(marked.status).toBe(200);
-      expect((marked.body.room as { persistent: boolean }).persistent).toBe(true);
+      expect((marked.body.room as { reserved: boolean }).reserved).toBe(true);
       expect(
         (marked.body.room as { expiresAt: number }).expiresAt,
       ).toBe(Number.MAX_SAFE_INTEGER);
@@ -636,7 +646,7 @@ runIntegration("room passwords on the production bundle", () => {
         body: { reserved: false },
       });
       expect(unmarked.status).toBe(200);
-      expect((unmarked.body.room as { persistent: boolean }).persistent).toBe(false);
+      expect((unmarked.body.room as { reserved: boolean }).reserved).toBe(false);
 
       // Nonsense input is refused rather than silently ignored.
       const bad = await adminLocal(`/rooms/${roomId}`, {
@@ -671,7 +681,7 @@ runIntegration("room passwords on the production bundle", () => {
       // Audit entries record the change without the secret.
       const audit = await adminLocal("/audit");
       const events = (audit.body.events ?? []) as { kind: string }[];
-      expect(events.some((e) => e.kind === "reserved:password:set")).toBe(true);
+      expect(events.some((e) => e.kind === "room:password:set")).toBe(true);
       expect(JSON.stringify(events)).not.toContain(PASSWORD);
     });
   }, 40_000);
@@ -692,6 +702,128 @@ runIntegration("room passwords on the production bundle", () => {
       const room = await adminLocal(`/rooms/${roomId}`);
       expect((room.body.room as { locked: boolean }).locked).toBe(true);
     });
+  }, 40_000);
+
+  it("lets the host make their own room private, and public again", async () => {
+    const h = await bootServer();
+    try {
+      const a = makeClient(h.port);
+      const host = await a.connected;
+      await a.init;
+      const created = once<{ room: PublicRoom }>(host, "room:joined");
+      host.emit("room:create", {});
+      const room = (await created).room;
+      expect(room.locked).toBe(false);
+
+      // A stranger following the invite link gets straight in while it is public.
+      const enter = async (password?: string): Promise<string> => {
+        const c = makeClient(h.port);
+        const s = await c.connected;
+        await c.init;
+        const outcome = Promise.race([
+          once<{ room: PublicRoom }>(s, "room:joined").then(() => "granted"),
+          once<ErrorPayload>(s, "error").then((e) => e.code),
+        ]);
+        s.emit("room:join", { code: room.code, password });
+        const result = await outcome;
+        s.disconnect();
+        return result;
+      };
+
+      expect(await enter()).toBe("granted");
+
+      // The host sets a password — no admin involved, no settings toggle.
+      const locked = once<{ locked: boolean; passwordExpiresAt: number }>(host, "room:privacy");
+      host.emit("room:privacy", { roomId: room.id, password: "just us" });
+      expect((await locked).locked).toBe(true);
+
+      // Now the door is shut, and the host is not affected (already seated).
+      expect(await enter()).toBe("room_password_required");
+      expect(await enter("wrong")).toBe("room_password_invalid");
+      expect(await enter("just us")).toBe("granted");
+
+      // Everybody inside is told, so the room does not change under them.
+      const pill = once<{ message: { text: string } }>(host, "message:new");
+      await pill;
+      const second = makeClient(h.port);
+      const guest = await second.connected;
+      await second.init;
+      const joined = once<{ room: PublicRoom }>(guest, "room:joined");
+      guest.emit("room:join", { code: room.code, password: "just us" });
+      expect((await joined).room.locked).toBe(true);
+
+      // A non-host cannot change it, either to lock or to unlock.
+      const refused = once<ErrorPayload>(guest, "error");
+      guest.emit("room:privacy", { roomId: room.id, password: null });
+      expect((await refused).code).toBe("not_host");
+
+      // The host opens it back up and the room behaves publicly again.
+      const opened = once<{ locked: boolean }>(guest, "room:privacy");
+      host.emit("room:privacy", { roomId: room.id, password: null });
+      expect((await opened).locked).toBe(false);
+      expect(await enter()).toBe("granted");
+
+      // A password the server would refuse is reported, not silently applied.
+      const rejected = once<ErrorPayload>(host, "error");
+      host.emit("room:privacy", { roomId: room.id, password: "ab" });
+      expect((await rejected).code).toBe("room_password_rejected");
+    } finally {
+      await h.stop();
+    }
+  }, 40_000);
+
+  it("keeps privacy and reserved independent, and expires a password", async () => {
+    const h = await bootServer();
+    try {
+      const a = makeClient(h.port);
+      const host = await a.connected;
+      await a.init;
+      const created = once<{ room: PublicRoom }>(host, "room:joined");
+      host.emit("room:create", {});
+      const room = (await created).room;
+
+      const summaryOf = async () => {
+        const res = await fetch(`http://127.0.0.1:${h.port}/admin/rooms/${room.id}`, {
+          headers: { "x-admin-key": ADMIN_KEY },
+        });
+        return (await res.json()) as {
+          room: { reserved: boolean; locked: boolean; expiresAt: number };
+        };
+      };
+
+      // Public and not reserved: the ordinary case.
+      expect((await summaryOf()).room.reserved).toBe(false);
+
+      host.emit("room:privacy", { roomId: room.id, password: "short lived" });
+      await once(host, "room:privacy");
+
+      // Locked without being reserved: private, and still on the normal TTL.
+      const summary = (await summaryOf()).room;
+      expect(summary.locked).toBe(true);
+      expect(summary.reserved).toBe(false);
+      expect(summary.expiresAt).toBeLessThan(Number.MAX_SAFE_INTEGER);
+
+      // Reserved as well: still private, and now it never expires on its own.
+      const marked = await fetch(`http://127.0.0.1:${h.port}/admin/rooms/${room.id}`, {
+        method: "PATCH",
+        headers: { "x-admin-key": ADMIN_KEY, "content-type": "application/json" },
+        body: JSON.stringify({ reserved: true }),
+      });
+      const both = ((await marked.json()) as {
+        room: { reserved: boolean; locked: boolean; expiresAt: number };
+      }).room;
+      expect(both.reserved).toBe(true);
+      expect(both.locked).toBe(true);
+      expect(both.expiresAt).toBe(Number.MAX_SAFE_INTEGER);
+
+      // An expiry in the past is clamped into the future rather than accepted.
+      const bad = once<{ locked: boolean; passwordExpiresAt: number }>(host, "room:privacy");
+      host.emit("room:privacy", { roomId: room.id, password: "clamped", passwordExpiresAt: 1 });
+      const applied = await bad;
+      expect(applied.passwordExpiresAt).toBeGreaterThan(Date.now());
+    } finally {
+      await h.stop();
+    }
   }, 40_000);
 
   // Issue #64. These actions used to be gated on "is anyone in this room",

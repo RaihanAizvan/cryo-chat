@@ -28,12 +28,7 @@ const NUMBER_FIELDS: FieldDef[] = [
   { key: "messageRateWindowSeconds", label: "Rate window (s)", hint: "Rolling window for the rate limit.", kind: "number", min: 1, max: 3600 },
 ];
 
-const TEXT_FIELDS: FieldDef[] = [
-  { key: "reservedRoomCode", label: "Reserved room code", hint: "Exactly 4 letters/digits — the persistent room.", kind: "text" },
-];
-
 const TOGGLE_FIELDS: FieldDef[] = [
-  { key: "reservedRoomEnabled", label: "Reserved room enabled", hint: "When off, the reserved room is not auto-created.", kind: "toggle" },
   { key: "voiceNotesEnabled", label: "Voice notes enabled", hint: "When off, the app hides the voice-note (mic) button.", kind: "toggle" },
 ];
 
@@ -60,9 +55,7 @@ export function AdminSettings() {
   if (!form) return <EmptyState label="Couldn't load settings." />;
 
   const current = s.data!;
-  const dirty = NUMBER_FIELDS.some((f) => form[f.key] !== current[f.key]) ||
-    TEXT_FIELDS.some((f) => form[f.key] !== current[f.key]) ||
-    TOGGLE_FIELDS.some((f) => form[f.key] !== current[f.key]);
+  const dirty = [...NUMBER_FIELDS, ...TOGGLE_FIELDS].some((f) => form[f.key] !== current[f.key]);
 
   const set = <K extends keyof Omit<AdminSettings, "adminEnabled">>(key: K, value: AdminSettings[K]) =>
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -72,11 +65,7 @@ export function AdminSettings() {
   const save = async () => {
     if (!form) return;
     const patch: Record<string, unknown> = {};
-    const all: (FieldDef & { key: keyof Omit<AdminSettings, "adminEnabled"> })[] = [
-      ...NUMBER_FIELDS,
-      ...TEXT_FIELDS,
-      ...TOGGLE_FIELDS,
-    ];
+    const all: FieldDef[] = [...NUMBER_FIELDS, ...TOGGLE_FIELDS];
     for (const f of all) {
       if (form[f.key] !== current[f.key]) patch[f.key] = form[f.key];
     }
@@ -124,9 +113,12 @@ export function AdminSettings() {
           title="App settings"
           subtitle="Applied immediately to live traffic"
           right={
-            <Badge tone={current.adminEnabled ? "green" : "amber"}>
-              admin {current.adminEnabled ? "enabled" : "disabled"}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge tone="accent">front door {current.specialRoomCode}</Badge>
+              <Badge tone={current.adminEnabled ? "green" : "amber"}>
+                admin {current.adminEnabled ? "enabled" : "disabled"}
+              </Badge>
+            </div>
           }
         />
         <div className="p-4">
@@ -144,21 +136,6 @@ export function AdminSettings() {
                   value={form[f.key] as number}
                   onChange={(e) => set(f.key, Number(e.target.value))}
                   className="w-full rounded-xl border border-base-border2 bg-base-sunken px-3 py-2 text-sm tabular-nums text-ink focus:border-accent focus:outline-none"
-                />
-                <span className="text-[11px] text-ink-faint">{f.hint}</span>
-              </label>
-            ))}
-            {TEXT_FIELDS.map((f) => (
-              <label key={f.key} className="flex flex-col gap-1">
-                <span className="text-xs font-medium uppercase tracking-wider text-ink-faint">
-                  {f.label}
-                </span>
-                <input
-                  type="text"
-                  value={String(form[f.key] ?? "")}
-                  maxLength={4}
-                  onChange={(e) => set(f.key, e.target.value.toUpperCase())}
-                  className="w-full rounded-xl border border-base-border2 bg-base-sunken px-3 py-2 font-mono text-sm text-ink focus:border-accent focus:outline-none"
                 />
                 <span className="text-[11px] text-ink-faint">{f.hint}</span>
               </label>

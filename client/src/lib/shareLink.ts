@@ -6,8 +6,8 @@
 export function roomShareLink(room: {
   id: string;
   code: string;
-  persistent: boolean;
+  reserved: boolean;
 }): string {
   const base = window.location.origin;
-  return room.persistent ? `${base}/${room.code}` : `${base}/r/${room.id}`;
+  return room.reserved ? `${base}/${room.code}` : `${base}/r/${room.id}`;
 }

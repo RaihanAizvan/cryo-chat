@@ -21,11 +21,23 @@ export interface ClientToServerEventMap {
   "room:join": {
     code?: string;
     roomId?: string;
-    /** Password for a password-protected room (the reserved room). */
+    /** Password for a password-protected room. */
     password?: string;
     /** Access token from a previous unlock, so nobody re-types the password. */
     token?: string;
   };
+  /**
+   * Host-only: make this room private (by setting a password) or public again.
+   * `password: null` clears it. Does not evict anyone already inside.
+   */
+  "room:privacy": {
+    roomId: string;
+    password: string | null;
+    /** Epoch ms the password stops working, or 0/undefined for "never". */
+    passwordExpiresAt?: number;
+  };
+  /** Host-only: sign every saved device out without changing the password. */
+  "room:revoke-access": { roomId: string };
   /** Leave a room (may be silent if not present). */
   "room:leave": { roomId: string };
   /** Close a room: everyone is kicked and it is destroyed. */
@@ -125,6 +137,8 @@ export interface ErrorPayload {
   clientId?: string;
   /** The room the error refers to, so a client can prompt for that room. */
   roomCode?: string;
+  /** For `rate_limited`: seconds until the caller may try again. */
+  retryAfterSeconds?: number;
 }
 
 /** Colors a participant may be assigned (index into a fixed palette). */
@@ -248,11 +262,13 @@ export interface RoomStatus {
   exists: boolean;
   /** Current number of participants inside. */
   participantCount: number;
-  /** Expiry the client should use (far-future for the persistent room). */
+  /** Expiry the client should use (far-future for a reserved room). */
   expiresAt: number;
-  persistent: boolean;
-  /** True when entry needs a password (the reserved room), so the UI can warn. */
+  reserved: boolean;
+  /** True when entry needs a password, so the UI can warn before someone hits it. */
   locked: boolean;
+  /** When the password lapses, or 0. Lets the home screen say "expires in…". */
+  passwordExpiresAt: number;
 }
 
 export interface PublicRoom {
@@ -264,8 +280,12 @@ export interface PublicRoom {
   participants: Participant[];
   /** True if the requesting client is the room host. */
   isHost: boolean;
-  /** True for the special preserved room: never auto-expires, closed manually. */
-  persistent: boolean;
+  /** Operator decision: this room never auto-expires. Says nothing about privacy. */
+  reserved: boolean;
+  /** True when entry currently needs a password. */
+  locked: boolean;
+  /** When the current password lapses, or 0 if it does not. Never sent for a public room. */
+  passwordExpiresAt: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,9 +301,11 @@ export interface AdminRoomSummary {
   code: string;
   createdAt: number;
   expiresAt: number;
-  persistent: boolean;
+  reserved: boolean;
   /** True when the room needs a password to enter. Never the password itself. */
   locked: boolean;
+  /** When the password lapses, or 0. */
+  passwordExpiresAt: number;
   hostId: string;
   participantCount: number;
   messageCount: number;
@@ -348,9 +370,9 @@ export type AdminAuditKind =
   | "member:kicked"
   | "member:banned"
   | "room:reserved"
-  | "reserved:password:set"
-  | "reserved:password:removed"
-  | "reserved:access:revoked"
+  | "room:password:set"
+  | "room:password:removed"
+  | "room:access:revoked"
   | "settings:update";
 
 /** One entry of the admin audit trail. */
@@ -378,15 +400,14 @@ export interface AdminSettings {
   maxSocketsPerIp: number;
   messageRateLimit: number;
   messageRateWindowSeconds: number;
-  reservedRoomCode: string;
-  reservedRoomEnabled: boolean;
-  /**
-   * True when the reserved room has a password. The password itself is never
-   * sent to a client — not even to the admin console.
-   */
   /** When false, the app hides the voice-note (mic) button. */
   voiceNotesEnabled: boolean;
   adminEnabled: boolean;
+  /**
+   * The fixed front-door code. Env-only, not editable here: it names an ordinary
+   * room now, so there is nothing for an operator to configure about it.
+   */
+  specialRoomCode: string;
 }
 
 /** Live summary numbers for the dashboard. */

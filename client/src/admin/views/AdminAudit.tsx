@@ -27,9 +27,9 @@ const AUDIT_KINDS: AdminAuditKind[] = [
   "media:upload",
   "member:kicked",
   "member:banned",
-  "reserved:password:set",
-  "reserved:password:removed",
-  "reserved:access:revoked",
+  "room:password:set",
+  "room:password:removed",
+  "room:access:revoked",
   "settings:update",
 ];
 
@@ -50,9 +50,9 @@ const KIND_TONE: Record<AdminAuditKind, string> = {
   "member:kicked": "rose",
   "member:banned": "rose",
   "room:reserved": "accent",
-  "reserved:password:set": "amber",
-  "reserved:password:removed": "amber",
-  "reserved:access:revoked": "rose",
+  "room:password:set": "amber",
+  "room:password:removed": "amber",
+  "room:access:revoked": "rose",
   "settings:update": "amber",
 };
 

@@ -18,7 +18,7 @@ import * as pack from "./pack.js";
 import * as audit from "./audit.js";
 import { normalizeMessage, normalizeCaption } from "./validation.js";
 import { normalizeCode } from "./util.js";
-import { getSettings, isReservedCode } from "./settings.js";
+import { getSettings, isSpecialCode } from "./settings.js";
 import { decideEntry, issueAccessToken, isRoomLocked } from "./reserved.js";
 import { isBanned } from "./bans.js";
 import { store } from "./store.js";
@@ -139,19 +139,31 @@ async function admitRoom(
     // A room code is only four characters, so a wrong guess is a cheap guess
     // unless we charge for it. Each attempt costs a scrypt hash server-side;
     // throttle by identity and by address so the space cannot be walked.
+    //
+    // The address bucket is the one that matters: an identity here is just a
+    // display name the visitor chose, so it costs nothing to take a new one and
+    // walk past the per-identity limit. The identity bucket still helps honest
+    // typos, so both stay.
     const ip = socket.handshake.address ?? "unknown";
-    const allowed =
-      (await store.rateLimit(
-        `roomkey:${room.code}:${sessionId}`,
-        PASSWORD_ATTEMPTS_PER_SESSION,
-        60_000,
-      )) &&
-      (await store.rateLimit(`roomkey-ip:${room.code}:${ip}`, PASSWORD_ATTEMPTS_PER_IP, 60_000));
-    if (!allowed) {
+    const perSession = await store.rateLimitWithRetry(
+      `roomkey:${room.code}:${sessionId}`,
+      PASSWORD_ATTEMPTS_PER_SESSION,
+      60_000,
+    );
+    const perIp = await store.rateLimitWithRetry(
+      `roomkey-ip:${room.code}:${ip}`,
+      PASSWORD_ATTEMPTS_PER_IP,
+      60_000,
+    );
+    if (!perSession.allowed || !perIp.allowed) {
+      // Report the longer of the two waits: retrying when the shorter window
+      // clears just earns another rejection.
+      const retryAfterSeconds = Math.max(perSession.retryAfterSeconds, perIp.retryAfterSeconds);
       sendError(socket, {
         code: "rate_limited",
-        message: "Too many password attempts. Wait a minute and try again.",
+        message: `Too many password attempts. Try again in ${retryAfterSeconds}s.`,
         roomCode: room.code,
+        retryAfterSeconds,
       });
       return false;
     }
@@ -321,7 +333,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
     socket.emit("room:created", { roomId: room.id, code: room.code });
     audit.record({
       kind: "room:created",
-      message: `Room ${room.code} created` + (room.persistent ? " (reserved)" : ""),
+      message: `Room ${room.code} created` + (room.reserved ? " (reserved)" : ""),
       actor: getSession(socket).name,
       sessionId: getSession(socket).id,
       roomId: room.id,
@@ -338,8 +350,8 @@ export function attachHandlers(io: Server, socket: Socket): void {
     // but resolving it is not the same as being allowed in.
     const room = roomId
       ? await rooms.loadRoomFromStore(roomId)
-      : code && isReservedCode(code)
-        ? await rooms.getOrCreateReservedRoomClaimed()
+      : code && isSpecialCode(code)
+        ? await rooms.getOrCreateSpecialRoomClaimed()
         : code
           ? await rooms.loadRoomByCodeFromStore(code)
           : undefined;
@@ -370,6 +382,88 @@ export function attachHandlers(io: Server, socket: Socket): void {
     closeRoom(io, membership.room);
   });
 
+  /**
+   * Host-only privacy control. This is the whole point of "a private room":
+   * anyone can decide their own conversation needs a door, not just whoever
+   * runs the server.
+   *
+   * Setting a password rotates the hash, which is also the token signing key,
+   * so everyone else's saved device is signed out for free. Clearing it makes
+   * the room public again. Neither evicts anyone already seated — a password
+   * governs who may enter next, which is the only thing it can do after the
+   * fact, and quietly throwing people out of a live room is worse than letting
+   * them finish the conversation.
+   */
+  socket.on("room:privacy", (raw) => {
+    const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
+    const membership = requireHost(socket, roomId);
+    if (!membership) return;
+    const room = membership.room;
+    const wasLocked = rooms.isLocked(room);
+
+    if (raw?.password === null) {
+      rooms.clearRoomPassword(room);
+    } else if (typeof raw?.password === "string") {
+      const result = rooms.setRoomPassword(room, raw.password, raw.passwordExpiresAt);
+      if (!result.ok) {
+        sendError(socket, { code: "room_password_rejected", message: result.error });
+        return;
+      }
+    } else {
+      sendError(socket, {
+        code: "room_password_rejected",
+        message: "Send a password, or null to make the room public.",
+      });
+      return;
+    }
+
+    const nowLocked = rooms.isLocked(room);
+    io.to(room.id).emit("room:privacy", {
+      roomId: room.id,
+      locked: nowLocked,
+      passwordExpiresAt: nowLocked ? room.passwordExpiresAt : 0,
+    });
+    if (wasLocked !== nowLocked) {
+      const pill = rooms.addSystemMessage(
+        room,
+        nowLocked ? `${getSession(socket).name} made this room private` : `${getSession(socket).name} made this room public`,
+      );
+      io.to(room.id).emit("message:new", { message: pill });
+    }
+    audit.record({
+      kind: nowLocked ? "room:password:set" : "room:password:removed",
+      message: nowLocked
+        ? `${room.code} made private by ${getSession(socket).name}`
+        : `${room.code} made public by ${getSession(socket).name}`,
+      actor: getSession(socket).name,
+      sessionId: getSession(socket).id,
+      roomId: room.id,
+      roomCode: room.code,
+    });
+    // The host's own view changes too, and `room:joined` is not re-sent.
+    socket.emit("room:privacy", {
+      roomId: room.id,
+      locked: nowLocked,
+      passwordExpiresAt: nowLocked ? room.passwordExpiresAt : 0,
+    });
+  });
+
+  /** Host-only: sign out every saved device without changing the password. */
+  socket.on("room:revoke-access", (raw) => {
+    const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
+    const membership = requireHost(socket, roomId);
+    if (!membership) return;
+    rooms.revokeRoomAccess(membership.room);
+    audit.record({
+      kind: "room:access:revoked",
+      message: `Access revoked for ${membership.room.code}`,
+      actor: getSession(socket).name,
+      sessionId: getSession(socket).id,
+      roomId: membership.room.id,
+      roomCode: membership.room.code,
+    });
+  });
+
   // Home screen: current status of a handful of saved rooms (live participant
   // counts, open vs closed). Used by the recent-rooms list to stay truthful.
   socket.on("room:status", async (raw) => {
@@ -382,14 +476,14 @@ export function attachHandlers(io: Server, socket: Socket): void {
       // room re-creation, while a saved roomId can go stale (e.g. 9999 after
       // it is recreated). Falling back to the id covers deep-link refs.
       const room = code
-        ? isReservedCode(code)
-          ? await rooms.getOrCreateReservedRoomClaimed()
+        ? isSpecialCode(code)
+          ? await rooms.getOrCreateSpecialRoomClaimed()
           : await rooms.loadRoomByCodeFromStore(code)
         : roomId
           ? await rooms.loadRoomFromStore(roomId)
           : undefined;
       if (!room) {
-        statuses.push({ code, roomId, exists: false, participantCount: 0, expiresAt: 0, persistent: false, locked: false });
+        statuses.push({ code, roomId, exists: false, participantCount: 0, expiresAt: 0, reserved: false, locked: false, passwordExpiresAt: 0 });
         continue;
       }
       statuses.push({
@@ -397,11 +491,12 @@ export function attachHandlers(io: Server, socket: Socket): void {
         roomId: room.id,
         exists: true,
         participantCount: room.participants.size,
-        expiresAt: room.persistent ? Number.MAX_SAFE_INTEGER : room.expiresAt,
-        persistent: room.persistent,
+        expiresAt: room.reserved ? Number.MAX_SAFE_INTEGER : room.expiresAt,
+        reserved: room.reserved,
         // Lets the home screen show a lock before the user tries to join,
         // instead of a password prompt after the fact.
         locked: isRoomLocked(room),
+        passwordExpiresAt: isRoomLocked(room) ? room.passwordExpiresAt : 0,
       });
     }
     socket.emit("room:status:result", { statuses });

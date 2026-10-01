@@ -38,7 +38,7 @@ function RoomAccessDialog({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  const [reserved, setReserved] = useState(room.persistent);
+  const [reserved, setReserved] = useState(room.reserved);
   const [locked, setLocked] = useState(room.locked);
   const [draft, setDraft] = useState("");
   const [show, setShow] = useState(false);
@@ -52,7 +52,7 @@ function RoomAccessDialog({
     setDone(null);
     try {
       const updated = await action();
-      setReserved(updated.persistent);
+      setReserved(updated.reserved);
       setLocked(updated.locked);
       setDone(message);
       onChanged();
@@ -224,8 +224,8 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return (rooms.data ?? []).filter((r) => {
-      if (filter === "reserved" && !r.persistent) return false;
-      if (filter === "normal" && r.persistent) return false;
+      if (filter === "reserved" && !r.reserved) return false;
+      if (filter === "normal" && r.reserved) return false;
       if (filter === "locked" && !r.locked) return false;
       if (!q) return true;
       return r.code.toLowerCase().includes(q) || r.id.toLowerCase().includes(q);
@@ -322,7 +322,7 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        {r.persistent ? (
+                        {r.reserved ? (
                           <IconShield width={14} height={14} className="shrink-0 text-accent" />
                         ) : r.locked ? (
                           <IconLock width={14} height={14} className="shrink-0 text-accent" />
@@ -332,7 +332,7 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="font-medium text-ink">{r.code}</span>
-                            {r.persistent && <Badge tone="accent">reserved</Badge>}
+                            {r.reserved && <Badge tone="accent">reserved</Badge>}
                             {r.locked && <Badge tone="green">locked</Badge>}
                           </div>
                           <div className="font-mono text-[11px] text-ink-faint">{shortId(r.id)}</div>
@@ -343,7 +343,7 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
                       {fmtDateTime(r.createdAt)}
                     </td>
                     <td className="px-3 py-3 text-xs tabular-nums text-ink-muted">
-                      {r.persistent ? "never" : fmtExpiry(r.expiresAt)}
+                      {r.reserved ? "never" : fmtExpiry(r.expiresAt)}
                     </td>
                     <td className="px-3 py-3 text-sm tabular-nums text-ink">
                       {r.participantCount}
@@ -384,7 +384,7 @@ export function AdminRooms({ onOpenRoom }: { onOpenRoom: (id: string) => void })
         <RoomAccessDialog
           // Remount when the server-side state changes, so the dialog always
           // starts from the room's real state instead of a stale copy.
-          key={`${editing.id}:${editing.persistent}:${editing.locked}`}
+          key={`${editing.id}:${editing.reserved}:${editing.locked}`}
           room={editing}
           onClose={() => setEditingId(null)}
           onChanged={rooms.reload}

@@ -43,8 +43,8 @@ export interface Config {
   messageRateLimit: number;
   /** Max concurrent sockets per IP. */
   maxSocketsPerIp: number;
-  /** Fixed code for the preserved room (easy to remember). */
-  reservedRoomCode: string;
+  /** Fixed code for the front-door room, so there is always somewhere to go. */
+  specialRoomCode: string;
   /** Sweep interval for expiry/cleanup. */
   sweepIntervalMs: number;
   /** If set, serve the built client from this directory (production). */
@@ -113,7 +113,7 @@ export const config: Config = {
   messageRateWindowMs: Number(process.env.MESSAGE_RATE_WINDOW_MS ?? 10_000),
   messageRateLimit: Number(process.env.MESSAGE_RATE_LIMIT ?? 10),
   maxSocketsPerIp: Number(process.env.MAX_SOCKETS_PER_IP ?? 20),
-  reservedRoomCode: process.env.RESERVED_ROOM_CODE ?? "9999",
+  specialRoomCode: (process.env.SPECIAL_ROOM_CODE ?? process.env.RESERVED_ROOM_CODE ?? "9999").toUpperCase(),
   sweepIntervalMs: Number(process.env.SWEEP_INTERVAL_MS ?? 30_000),
   clientDist: process.env.CLIENT_DIST ?? DEFAULT_CLIENT_DIST,
   giphyApiKey: process.env.GIPHY_API_KEY ?? "",

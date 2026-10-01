@@ -20,18 +20,6 @@ export interface SettingsDict {
   maxSocketsPerIp: number;
   messageRateLimit: number;
   messageRateWindowMs: number;
-  reservedRoomCode: string;
-  reservedRoomEnabled: boolean;
-  /**
-   * Salted scrypt hash of the reserved-room password. Empty means the room is
-   * open to anyone who knows the code. The plaintext never leaves the admin
-   * request that set it.
-   */
-  /**
-   * Bumped whenever the password changes or saved access is revoked. Access
-   * tokens carry the version they were issued under, so this is the switch that
-   * signs everyone out without touching the password.
-   */
   voiceNotesEnabled: boolean;
   sweepIntervalMs: number;
 }
@@ -49,12 +37,18 @@ const MAX_WINDOW_S = 3600;
 const MIN_SOCKETS_PER_IP = 1;
 const MAX_SOCKETS_PER_IP = 200;
 
-/** Sanitize a reserved room code (empty string disables the concept). */
-function normalizeReservedCode(raw: unknown): string {
-  if (typeof raw !== "string") return config.reservedRoomCode;
-  const clean = raw.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-  if (clean.length !== 4) return config.reservedRoomCode;
-  return clean;
+/**
+ * The code that always resolves to a room, so there is a stable front door.
+ *
+ * This used to be an admin-tunable setting (`reservedRoomCode` plus a toggle),
+ * which meant "the special room" was a thing operators configured rather than a
+ * property of the app — and a password only ever made sense on that one room,
+ * which is why protecting any room at all was awkward. It is now a fixed code
+ * from the environment, and an ordinary room: whether it is private and whether
+ * it is reserved are separate decisions.
+ */
+function specialRoomCode(): string {
+  return config.specialRoomCode;
 }
 
 function base(): SettingsDict {
@@ -67,8 +61,6 @@ function base(): SettingsDict {
     maxSocketsPerIp: Math.min(MAX_SOCKETS_PER_IP, Math.max(MIN_SOCKETS_PER_IP, config.maxSocketsPerIp)),
     messageRateLimit: config.messageRateLimit,
     messageRateWindowMs: config.messageRateWindowMs,
-    reservedRoomCode: config.reservedRoomCode,
-    reservedRoomEnabled: true,
     voiceNotesEnabled: true,
     sweepIntervalMs: config.sweepIntervalMs,
   };
@@ -138,27 +130,6 @@ export function updateSettings(patch: Record<string, unknown>): { ok: true; sett
   if (patch.messageRateWindowSeconds !== undefined) {
     next.messageRateWindowMs = clampInt(patch.messageRateWindowSeconds, MIN_WINDOW_S, MAX_WINDOW_S, next.messageRateWindowMs / 1000) * 1000;
   }
-  if (patch.reservedRoomCode !== undefined) {
-    if (typeof patch.reservedRoomCode !== "string") {
-      errors.push("reservedRoomCode must be a string");
-    } else {
-      const clean = patch.reservedRoomCode.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      if (clean.length !== 4) errors.push("Reserved code must be exactly 4 letters or digits.");
-      else next.reservedRoomCode = clean;
-    }
-  }
-  if (patch.reservedRoomEnabled !== undefined) {
-    if (typeof patch.reservedRoomEnabled !== "boolean") {
-      errors.push("reservedRoomEnabled must be a boolean");
-    } else {
-      next.reservedRoomEnabled = patch.reservedRoomEnabled;
-    }
-  }
-  if (patch.reservedRoomPassword !== undefined) {
-    // The password is deliberately NOT part of the generic settings patch: it
-    // would end up in the audit detail blob and in every settings broadcast.
-    errors.push("Set the reserved-room password through its own endpoint.");
-  }
   if (patch.voiceNotesEnabled !== undefined) {
     if (typeof patch.voiceNotesEnabled !== "boolean") {
       errors.push("voiceNotesEnabled must be a boolean");
@@ -168,14 +139,30 @@ export function updateSettings(patch: Record<string, unknown>): { ok: true; sett
   }
 
   if (errors.length > 0) return { ok: false, error: errors.join(" ") };
+  // Passwords never go through here. They are not part of SettingsDict at all,
+  // and the generic patch fans out to every listener and into the audit detail
+  // blob — so a key that even looks like a secret is refused loudly instead of
+  // being silently dropped and looking like it worked.
+  for (const key of Object.keys(patch)) {
+    if (/password|secret|hash/i.test(key)) {
+      return {
+        ok: false,
+        error: `${key} is not a setting. Set a room password through the room's own endpoint.`,
+      };
+    }
+  }
   current = next;
   void store.saveSettings(current);
   return { ok: true, settings: current };
 }
 
-/** True when `code` is the (enabled) preserved room code. */
-export function isReservedCode(code: string): boolean {
-  return current.reservedRoomEnabled && code === current.reservedRoomCode;
+/**
+ * True when `code` is the fixed front-door code. Unlike the old admin setting
+ * this is not toggleable at run time: the room it names is an ordinary room,
+ * and every other room can carry a password too.
+ */
+export function isSpecialCode(code: string): boolean {
+  return code === specialRoomCode();
 }
 
 /** Effective message-length ceiling (min of protocol cap and admin setting). */
@@ -183,4 +170,4 @@ export function maxMessageLength(): number {
   return Math.max(1, Math.min(MAX_MESSAGE_LENGTH, current.maxMessageLength));
 }
 
-export { normalizeReservedCode };
+export { specialRoomCode };

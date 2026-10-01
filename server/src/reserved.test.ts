@@ -7,6 +7,8 @@ import {
   issueAccessToken,
   verifyAccessToken,
   verifyPassword,
+  isRoomLocked,
+  isPasswordInForce,
   type PasswordRoom,
 } from "./reserved.js";
 import { isLocked } from "./rooms.js";
@@ -16,7 +18,7 @@ const OTHER = "22222222-2222-2222-2222-222222222222";
 
 /** A locked room, without dragging the whole room module's state into a test. */
 function lockedRoom(code: string, password: string): PasswordRoom {
-  return { code, passwordHash: hashPassword(password), passwordVersion: 1 };
+  return { code, passwordHash: hashPassword(password), passwordVersion: 1, passwordExpiresAt: 0 };
 }
 
 /** The signing key, derived the same way the server derives it. */
@@ -32,7 +34,12 @@ function body(payload: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(payload)).toString("base64url");
 }
 
-const openRoom: PasswordRoom = { code: "1234", passwordHash: "", passwordVersion: 1 };
+const openRoom: PasswordRoom = {
+  code: "1234",
+  passwordHash: "",
+  passwordVersion: 1,
+  passwordExpiresAt: 0,
+};
 
 describe("password hashing", () => {
   it("stores no plaintext and verifies the right password", () => {
@@ -181,5 +188,39 @@ describe("entry decisions", () => {
     const b = lockedRoom("BBBB", "bravo pass");
     expect(decideEntry(a, SESSION, "alpha pass", undefined)).toBe("granted");
     expect(decideEntry(b, SESSION, "alpha pass", undefined)).toBe("invalid");
+  });
+});
+
+describe("password expiry", () => {
+  const lapsed: PasswordRoom = {
+    code: "CRYO",
+    passwordHash: hashPassword("cold brew"),
+    passwordVersion: 2,
+    passwordExpiresAt: Date.now() - 1,
+  };
+
+  it("stops requiring a password once it has lapsed", () => {
+    expect(isRoomLocked(lapsed)).toBe(false);
+    expect(decideEntry(lapsed, SESSION, undefined, undefined)).toBe("open");
+  });
+
+  it("does not care what the visitor supplies any more", () => {
+    // A lapsed room is public. Even a wrong password must not turn the visit
+    // into a rejection — that is the confusing failure mode where the room
+    // "rejects" people for a password it is not even checking.
+    expect(decideEntry(lapsed, SESSION, "wrong", undefined)).toBe("open");
+  });
+
+  it("still accepts the right password on a room that has not lapsed", () => {
+    const live: PasswordRoom = { ...lapsed, passwordExpiresAt: Date.now() + 60_000 };
+    expect(isRoomLocked(live)).toBe(true);
+    expect(decideEntry(live, SESSION, "cold brew", undefined)).toBe("granted");
+    expect(decideEntry(live, SESSION, "wrong", undefined)).toBe("invalid");
+  });
+
+  it("treats zero as never expiring", () => {
+    const forever: PasswordRoom = { ...lapsed, passwordExpiresAt: 0 };
+    expect(isPasswordInForce(forever)).toBe(true);
+    expect(isRoomLocked(forever)).toBe(true);
   });
 });
