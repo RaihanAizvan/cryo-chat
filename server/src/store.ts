@@ -485,7 +485,9 @@ class RedisStore implements Store {
         .persist(this.codeKey(room.code));
     }
     await tx.exec();
-    await this.publish("room", { kind: "snapshot", room } satisfies RoomEvent);
+    // Through publishRoom, not publish: the origin tag is what lets this
+    // instance ignore its own snapshot instead of re-applying it.
+    await this.publishRoom({ kind: "snapshot", room });
   }
 
   async deleteRoom(id: string): Promise<void> {

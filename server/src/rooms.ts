@@ -555,6 +555,16 @@ function applySnapshot(room: Room, snap: RoomSnapshot): void {
   room.createdAt = snap.createdAt;
   room.expiresAt = snap.persistent ? Number.POSITIVE_INFINITY : snap.expiresAt;
   room.persistent = snap.persistent;
+  // Take the authoritative password fields from the snapshot: an access token
+  // is checked against them, so a stale local hash would lock people out (or
+  // let them in with a rotated password). Every change to them bumps the
+  // version, so an older snapshot must never win — otherwise a snapshot still
+  // in flight would quietly reopen a room someone had just locked.
+  const version = snap.passwordVersion ?? 1;
+  if (version >= room.passwordVersion) {
+    room.passwordHash = snap.passwordHash ?? "";
+    room.passwordVersion = version;
+  }
   const next = new Map(snap.participants.map((p) => [p.id, { ...p }]));
   for (const [, pid] of room.sockets) {
     if (!next.has(pid)) {
