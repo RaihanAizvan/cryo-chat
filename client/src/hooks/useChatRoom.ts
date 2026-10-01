@@ -276,6 +276,17 @@ export function useChatRoom(): [RoomState, RoomActions] {
         return;
       }
       switch (err.code) {
+        case "rate_limited":
+          // A throttled password attempt never reaches the room: say so, and
+          // let the visitor try again rather than leaving the spinner up.
+          if (passwordPromptRef.current) {
+            setPasswordPrompt({
+              ...passwordPromptRef.current,
+              error: err.message,
+              busy: false,
+            });
+          }
+          break;
         case "room_password_required":
         case "room_password_invalid": {
           const code = err.roomCode;
@@ -324,7 +335,6 @@ export function useChatRoom(): [RoomState, RoomActions] {
           break;
         case "name_invalid":
         case "message_invalid":
-        case "rate_limited":
         case "not_in_room":
           // Not related to joining; ignore here.
           break;
@@ -346,6 +356,18 @@ export function useChatRoom(): [RoomState, RoomActions] {
     socket.on("connect", onConnect);
     socket.on("room:access", onAccess);
     socket.on("error", onError);
+    // A dropped connection mid-check would leave the prompt spinning forever:
+    // the answer is never coming on a socket that is gone.
+    const onDisconnect = () => {
+      const prompt = passwordPromptRef.current;
+      if (!prompt?.busy) return;
+      setPasswordPrompt({
+        ...prompt,
+        error: "Lost connection. Try again.",
+        busy: false,
+      });
+    };
+    socket.on("disconnect", onDisconnect);
 
     return () => {
       socket.off("room:joined", onJoined);
@@ -363,6 +385,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
       socket.off("connect", onConnect);
       socket.off("room:access", onAccess);
       socket.off("error", onError);
+      socket.off("disconnect", onDisconnect);
     };
   }, [enterRoom, exitRoom, touchHistory, session.sessionId]);
 
