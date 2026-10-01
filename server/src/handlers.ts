@@ -19,7 +19,7 @@ import * as audit from "./audit.js";
 import { normalizeMessage, normalizeCaption } from "./validation.js";
 import { normalizeCode } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
-import { decideEntry, issueAccessToken, isReservedRoomLocked } from "./reserved.js";
+import { decideEntry, issueAccessToken, isRoomLocked } from "./reserved.js";
 import { isBanned } from "./bans.js";
 import { store } from "./store.js";
 import type { RoomEventEnvelope } from "./store.js";
@@ -74,13 +74,15 @@ const PASSWORD_ATTEMPTS_PER_SESSION = 10;
 const PASSWORD_ATTEMPTS_PER_IP = 40;
 
 /**
- * The reserved room is the only password-protected room, so the gate keys off
- * the room itself (persistent) rather than off which path was used. That matters:
- * a share link (`/r/:id`) and claiming the code via `room:create` are just as
- * real a way in as typing the code, and all of them go through here.
+ * The password gate for entering a room.
  *
- * A socket that is already seated in the room is let straight through — that is
- * the server's own recovery path (connection-state recovery, or a reconnect
+ * It keys off the room rather than off which path was used, because a share link
+ * (`/r/:id`) and claiming the code via `room:create` are just as real a way in as
+ * typing the code, and all of them come through here. Every room has its own
+ * password; there is no shared one.
+ *
+ * A socket already seated in the room is let straight through — that is the
+ * server's own recovery path (connection-state recovery, or a reconnect
  * re-seat), and the only way to be seated is to have passed this gate before.
  * Without that carve-out, re-joining a room you are already in would demand the
  * password again for no reason.
@@ -95,14 +97,16 @@ async function admitRoom(
   token: unknown,
 ): Promise<boolean> {
   if (room.sockets.has(socket.id)) return true;
-  if (!room.persistent || !isReservedRoomLocked()) return true;
+  // Any room can carry a password, not just the reserved one, so this keys off
+  // the room's own hash.
+  if (!isRoomLocked(room)) return true;
 
   const sessionId = getSession(socket).id;
   const guessing = typeof password === "string" && password.length > 0;
   if (guessing) {
-    // The password is the only real secret behind a 4-character code, so a
-    // wrong guess costs a scrypt hash on the server. Throttle by identity and
-    // by address so the pair cannot be walked.
+    // A room code is only four characters, so a wrong guess is a cheap guess
+    // unless we charge for it. Each attempt costs a scrypt hash server-side;
+    // throttle by identity and by address so the space cannot be walked.
     const ip = socket.handshake.address ?? "unknown";
     const allowed =
       (await store.rateLimit(
@@ -121,9 +125,9 @@ async function admitRoom(
     }
   }
 
-  const decision = decideEntry(true, room.code, sessionId, password, token);
+  const decision = decideEntry(room, sessionId, password, token);
   if (decision === "open" || decision === "granted") {
-    const issued = issueAccessToken(room.code, sessionId);
+    const issued = issueAccessToken(room, sessionId);
     if (issued) {
       socket.emit("room:access", {
         code: room.code,
@@ -186,7 +190,7 @@ async function resumeRoom(io: Server, socket: Socket, session: Session): Promise
     if (ROOM_MEMBERSHIP.has(socket)) return; // already re-seated
     const room = await rooms.loadRoomFromStore(roomId);
     if (!room || rooms.isExpired(room)) continue;
-    if (room.persistent && isReservedRoomLocked()) continue;
+    if (isRoomLocked(room)) continue;
     if (!joinInternal(io, socket, room)) continue;
     emitJoined(io, socket, room);
     return;
@@ -368,7 +372,7 @@ export function attachHandlers(io: Server, socket: Socket): void {
         persistent: room.persistent,
         // Lets the home screen show a lock before the user tries to join,
         // instead of a password prompt after the fact.
-        locked: room.persistent && isReservedRoomLocked(),
+        locked: isRoomLocked(room),
       });
     }
     socket.emit("room:status:result", { statuses });

@@ -18,19 +18,26 @@
  * hash, so changing the password invalidates every outstanding token by
  * construction — no cleanup job can forget to run.
  *
+ * Every room carries its own password hash and version, so this module is
+ * room-scoped throughout: two rooms never share a password or a key.
+ *
  * A token is bound to the anonymous identity that unlocked it, expires on its
  * own, and carries the access "version" so the admin can revoke access without
  * rotating the password.
  */
 
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import type { ReservedRoomAccess } from "@cryo/shared";
-import {
-  getSettings,
-  reservedRoomLocked,
-  reservedRoomPasswordHash,
-  reservedRoomPasswordVersion,
-} from "./settings.js";
+
+/**
+ * The bits of a room this module needs. Declared structurally rather than
+ * importing `Room`, so the crypto stays independent of the room module (and of
+ * its store/session imports) and can be reasoned about on its own.
+ */
+export interface PasswordRoom {
+  code: string;
+  passwordHash: string;
+  passwordVersion: number;
+}
 
 /** How long an unlocked device stays unlocked. */
 export const ACCESS_TOKEN_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
@@ -88,12 +95,13 @@ interface AccessPayload {
 }
 
 /**
- * Signing key for access tokens: derived from the live password hash, so it
- * changes exactly when the password does. An unlocked device is therefore
- * signed out by a password change, on every instance, with no bookkeeping.
+ * Signing key for access tokens: derived from the room's live password hash, so
+ * it changes exactly when that password does. An unlocked device is therefore
+ * signed out by a password change, on every instance, with no bookkeeping — and
+ * because it is the *room's* hash, one room's password can never unlock another.
  */
-function tokenSecret(): string {
-  return `cryo-reserved:${reservedRoomPasswordHash()}`;
+function tokenSecret(room: PasswordRoom): string {
+  return `cryo-room:${room.passwordHash}`;
 }
 
 function sign(body: string, secret: string): string {
@@ -126,16 +134,16 @@ export interface IssuedAccess {
  * Mint an access token for a session that just proved the password. Returns
  * null when the room has no password, so callers can skip the round trip.
  */
-export function issueAccessToken(code: string, sessionId: string): IssuedAccess | null {
-  if (!reservedRoomLocked()) return null;
+export function issueAccessToken(room: PasswordRoom, sessionId: string): IssuedAccess | null {
+  if (!room.passwordHash) return null;
   const expiresAt = Date.now() + ACCESS_TOKEN_TTL_MS;
   const body = encodePayload({
     s: sessionId,
-    c: code,
-    v: reservedRoomPasswordVersion(),
+    c: room.code,
+    v: room.passwordVersion,
     e: expiresAt,
   });
-  return { token: `${body}.${sign(body, tokenSecret())}`, expiresAt };
+  return { token: `${body}.${sign(body, tokenSecret(room))}`, expiresAt };
 }
 
 /**
@@ -143,29 +151,33 @@ export function issueAccessToken(code: string, sessionId: string): IssuedAccess 
  * unexpected: bad shape, bad signature, wrong room, wrong identity, stale
  * version, or expired.
  */
-export function verifyAccessToken(token: unknown, code: string, sessionId: string): boolean {
+export function verifyAccessToken(
+  token: unknown,
+  room: PasswordRoom,
+  sessionId: string,
+): boolean {
   if (typeof token !== "string" || token.length === 0 || token.length > 512) return false;
-  if (!reservedRoomLocked()) return true; // nothing to unlock anymore
+  if (!room.passwordHash) return true; // nothing to unlock anymore
   const dot = token.lastIndexOf(".");
   if (dot <= 0) return false;
   const body = token.slice(0, dot);
   const signature = token.slice(dot + 1);
-  const expected = sign(body, tokenSecret());
+  const expected = sign(body, tokenSecret(room));
   const a = Buffer.from(signature);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
   const payload = decodePayload(body);
   if (!payload) return false;
-  if (payload.c !== code) return false;
+  if (payload.c !== room.code) return false;
   if (payload.s !== sessionId) return false;
-  if (payload.v !== reservedRoomPasswordVersion()) return false;
+  if (payload.v !== room.passwordVersion) return false;
   if (!Number.isFinite(payload.e) || payload.e <= Date.now()) return false;
   return true;
 }
 
-/** Check a password against the current reserved-room password. */
-export function verifyReservedPassword(password: string): boolean {
-  return verifyPassword(password, reservedRoomPasswordHash());
+/** Check a password against a specific room's password. */
+export function verifyRoomPassword(room: PasswordRoom, password: string): boolean {
+  return verifyPassword(password, room.passwordHash);
 }
 
 export type EntryDecision = "open" | "granted" | "invalid" | "required";
@@ -179,31 +191,20 @@ export type EntryDecision = "open" | "granted" | "invalid" | "required";
  * old device keeps its access alive as long as it keeps using it.
  */
 export function decideEntry(
-  locked: boolean,
-  code: string,
+  room: PasswordRoom,
   sessionId: string,
   password: unknown,
   token: unknown,
 ): EntryDecision {
-  if (!locked) return "open";
-  if (verifyAccessToken(token, code, sessionId)) return "granted";
+  if (!room.passwordHash) return "open";
+  if (verifyAccessToken(token, room, sessionId)) return "granted";
   if (typeof password === "string" && password.length > 0) {
-    return verifyReservedPassword(password) ? "granted" : "invalid";
+    return verifyRoomPassword(room, password) ? "granted" : "invalid";
   }
   return "required";
 }
 
-/** Whether the reserved room needs a password right now (cheap read for the UI). */
-export function isReservedRoomLocked(): boolean {
-  return reservedRoomLocked();
-}
-
-/** Admin-facing summary. Contains no secret material. */
-export function reservedRoomAccessState(): ReservedRoomAccess {
-  const s = getSettings();
-  return {
-    locked: s.reservedRoomPassword !== "",
-    enabled: s.reservedRoomEnabled,
-    code: s.reservedRoomCode,
-  };
+/** Whether a room needs a password right now (cheap read for the UI). */
+export function isRoomLocked(room: PasswordRoom): boolean {
+  return room.passwordHash !== "";
 }

@@ -413,6 +413,8 @@ class RedisStore implements Store {
       createdAt: Number(meta.createdAt ?? 0),
       expiresAt: persistent ? 0 : Number(meta.expiresAt ?? 0),
       persistent,
+      passwordHash: meta.passwordHash ?? "",
+      passwordVersion: Number(meta.passwordVersion ?? 1),
       participants: Object.values(people).map((j) => JSON.parse(j)),
       messages: messages.map((j) => JSON.parse(j)),
     };
@@ -456,6 +458,11 @@ class RedisStore implements Store {
         createdAt: String(room.createdAt),
         expiresAt: String(room.expiresAt),
         persistent: room.persistent ? "1" : "0",
+        // The room's own password hash and access version. Without these a
+        // locked room would come back open after a restart or on whichever
+        // instance has to hydrate it first.
+        passwordHash: room.passwordHash ?? "",
+        passwordVersion: String(room.passwordVersion ?? 1),
       })
       .del(this.roomPeople(id))
       .sadd(`${this.p}:rooms`, id)

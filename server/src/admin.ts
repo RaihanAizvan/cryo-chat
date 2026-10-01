@@ -24,15 +24,7 @@ import * as media from "./media.js";
 import * as sessions from "./sessions.js";
 import * as audit from "./audit.js";
 import * as bans from "./bans.js";
-import {
-  clearReservedRoomPassword,
-  getSettings,
-  reservedRoomLocked,
-  revokeReservedRoomAccess,
-  setReservedRoomPassword,
-  updateSettings,
-} from "./settings.js";
-import { reservedRoomAccessState } from "./reserved.js";
+import { getSettings, updateSettings } from "./settings.js";
 import { adminRemoveMember, closeRoom } from "./handlers.js";
 
 const bootAt = Date.now();
@@ -77,6 +69,7 @@ function roomSummary(r: rooms.Room): AdminRoomSummary {
     createdAt: r.createdAt,
     expiresAt: r.persistent ? Number.MAX_SAFE_INTEGER : r.expiresAt,
     persistent: r.persistent,
+    locked: rooms.isLocked(r),
     hostId: r.hostParticipantId,
     participantCount: r.participants.size,
     messageCount: r.messages.length,
@@ -364,21 +357,22 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     });
   });
 
-  // -- reserved room access -------------------------------------------------
-  // Kept off the generic settings patch on purpose: the password must not be
-  // able to ride along into the audit detail blob or the settings broadcast
-  // that every instance (and the admin UI) receives.
-  router.get("/reserved-room", (_req, res) => {
-    res.json({ reserved: reservedRoomAccessState() });
-  });
-
-  router.put("/reserved-room/password", (req, res) => {
+  // -- room access ----------------------------------------------------------
+  // Per room, not global: each room carries its own password. Kept off the
+  // generic settings patch on purpose, so a password can never ride along into
+  // the audit detail blob or the settings broadcast every instance receives.
+  router.put("/rooms/:id/password", (req, res) => {
+    const r = rooms.getRoom(req.params.id);
+    if (!r || rooms.isExpired(r)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
     const password = (req.body as { password?: unknown } | undefined)?.password;
     if (typeof password !== "string") {
       res.status(400).json({ error: "password_required" });
       return;
     }
-    const result = setReservedRoomPassword(password);
+    const result = rooms.setRoomPassword(r, password);
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;
@@ -386,39 +380,86 @@ export function mountAdminRoutes(app: Express, io: Server): void {
     audit.record({
       kind: "reserved:password:set",
       // The password is deliberately absent from the message and the detail.
-      message: `Reserved room password updated — everyone must re-enter it`,
+      message: rooms.isLocked(r)
+        ? `Password set for ${r.code} — anyone without it will be asked`
+        : `Password set for ${r.code}`,
       actor: "admin",
+      roomId: r.id,
+      roomCode: r.code,
       detail: JSON.stringify({ length: password.length }),
     });
-    res.json({ reserved: reservedRoomAccessState() });
+    res.json({ room: roomSummary(r) });
   });
 
-  router.delete("/reserved-room/password", (_req, res) => {
-    if (!reservedRoomLocked()) {
+  router.delete("/rooms/:id/password", (req, res) => {
+    const r = rooms.getRoom(req.params.id);
+    if (!r || rooms.isExpired(r)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!rooms.isLocked(r)) {
       res.status(409).json({ error: "no_password" });
       return;
     }
-    clearReservedRoomPassword();
+    rooms.clearRoomPassword(r);
     audit.record({
       kind: "reserved:password:removed",
-      message: "Reserved room password removed — the room is open again",
+      message: `Password removed from ${r.code} — the room is open again`,
       actor: "admin",
+      roomId: r.id,
+      roomCode: r.code,
     });
-    res.json({ reserved: reservedRoomAccessState() });
+    res.json({ room: roomSummary(r) });
   });
 
   /**
-   * Sign every unlocked device out without rotating the password. The next
-   * join from any device asks for the password again.
+   * Sign every unlocked device out without rotating the password. The next join
+   * from any device asks for the password again.
    */
-  router.post("/reserved-room/revoke-access", (_req, res) => {
-    revokeReservedRoomAccess();
+  router.post("/rooms/:id/revoke-access", (req, res) => {
+    const r = rooms.getRoom(req.params.id);
+    if (!r || rooms.isExpired(r)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if (!rooms.isLocked(r)) {
+      res.status(409).json({ error: "no_password" });
+      return;
+    }
+    rooms.revokeRoomAccess(r);
     audit.record({
       kind: "reserved:access:revoked",
-      message: "Reserved room access revoked for all saved devices",
+      message: `Saved access to ${r.code} revoked for every device`,
       actor: "admin",
+      roomId: r.id,
+      roomCode: r.code,
     });
-    res.json({ reserved: reservedRoomAccessState() });
+    res.json({ room: roomSummary(r) });
+  });
+
+  /** Mark a room reserved: it stops expiring on its own. */
+  router.patch("/rooms/:id", (req, res) => {
+    const r = rooms.getRoom(req.params.id);
+    if (!r || rooms.isExpired(r)) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    const reserved = (req.body as { reserved?: unknown } | undefined)?.reserved;
+    if (typeof reserved !== "boolean") {
+      res.status(400).json({ error: "reserved_must_be_boolean" });
+      return;
+    }
+    rooms.setReserved(r, reserved);
+    audit.record({
+      kind: "room:reserved",
+      message: reserved
+        ? `${r.code} was marked reserved — it will not expire on its own`
+        : `${r.code} is no longer reserved — it expires like any other room`,
+      actor: "admin",
+      roomId: r.id,
+      roomCode: r.code,
+    });
+    res.json({ room: roomSummary(r) });
   });
 
   // -- settings ------------------------------------------------------------
@@ -466,7 +507,6 @@ function settingsView(): AdminSettings {
     reservedRoomCode: s.reservedRoomCode,
     reservedRoomEnabled: s.reservedRoomEnabled,
     // The password itself is never exposed — only whether one is set.
-    reservedRoomPasswordSet: s.reservedRoomPassword !== "",
     voiceNotesEnabled: s.voiceNotesEnabled,
     adminEnabled: Boolean(config.adminKey),
   };

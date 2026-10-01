@@ -13,7 +13,6 @@ import type {
   AdminSettingsPatch,
   AdminStats,
   AdminUser,
-  ReservedRoomAccess,
 } from "@cryo/shared";
 
 const KEY_STORE = "cryo_admin_key";
@@ -144,26 +143,29 @@ export const adminApi = {
       body: JSON.stringify(patch),
     }).then((r) => r.settings),
 
-  /** Access state of the reserved room (never includes the password). */
-  reservedRoom: () =>
-    request<{ reserved: ReservedRoomAccess }>("/reserved-room").then((r) => r.reserved),
+  /** Mark a room reserved (never expires on its own) or un-reserve it. */
+  setRoomReserved: (id: string, reserved: boolean) =>
+    request<{ room: AdminRoomSummary }>(`/rooms/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ reserved }),
+    }).then((r) => r.room),
 
-  /** Set or change the reserved-room password. Signs out every device. */
-  setReservedRoomPassword: (password: string) =>
-    request<{ reserved: ReservedRoomAccess }>("/reserved-room/password", {
+  /** Set or change this room's password. Signs out every unlocked device. */
+  setRoomPassword: (id: string, password: string) =>
+    request<{ room: AdminRoomSummary }>(`/rooms/${id}/password`, {
       method: "PUT",
       body: JSON.stringify({ password }),
-    }).then((r) => r.reserved),
+    }).then((r) => r.room),
 
-  /** Remove the password: the reserved room becomes open to anyone. */
-  clearReservedRoomPassword: () =>
-    request<{ reserved: ReservedRoomAccess }>("/reserved-room/password", {
+  /** Remove the password: the room is open to anyone with the code again. */
+  clearRoomPassword: (id: string) =>
+    request<{ room: AdminRoomSummary }>(`/rooms/${id}/password`, {
       method: "DELETE",
-    }).then((r) => r.reserved),
+    }).then((r) => r.room),
 
   /** Invalidate saved access without changing the password. */
-  revokeReservedRoomAccess: () =>
-    request<{ reserved: ReservedRoomAccess }>("/reserved-room/revoke-access", {
+  revokeRoomAccess: (id: string) =>
+    request<{ room: AdminRoomSummary }>(`/rooms/${id}/revoke-access`, {
       method: "POST",
-    }).then((r) => r.reserved),
+    }).then((r) => r.room),
 };

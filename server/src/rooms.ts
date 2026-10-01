@@ -19,6 +19,7 @@ import type {
 } from "@cryo/shared";
 import { randomRoomCode, randomRoomId } from "./util.js";
 import { getSettings, isReservedCode } from "./settings.js";
+import { hashPassword } from "./reserved.js";
 import { store } from "./store.js";
 import type { RoomEventEnvelope } from "./store.js";
 import { redisMode } from "./store.js";
@@ -46,6 +47,15 @@ export interface Room {
   expiresAt: number;
   /** True for the special room: never auto-expires, closed only manually. */
   persistent: boolean;
+  /**
+   * Salted scrypt hash of this room's password, or "" when the room is open.
+   * Every room has its own — there is no shared password. The hash is never
+   * sent to a client; it doubles as the signing key for this room's access
+   * tokens, so rotating it invalidates every token handed out so far.
+   */
+  passwordHash: string;
+  /** Bumped to revoke access without rotating the password. */
+  passwordVersion: number;
   /** Map of participant nonce -> participant. */
   participants: Map<string, Participant>;
   /** Map of socket.id -> participant nonce. */
@@ -58,6 +68,10 @@ export interface Room {
  * A JSON-safe copy of a room, used to persist to Redis and to ship to other
  * instances. `persistent` rooms serialize `expiresAt` as 0 because JSON has no
  * Infinity (same trick the public room view uses).
+ *
+ * Older snapshots predate per-room passwords; the missing fields are treated as
+ * "no password, version 1" when restored, so an in-flight upgrade never turns
+ * into a crash or a lockout.
  */
 export interface RoomSnapshot {
   id: string;
@@ -66,6 +80,8 @@ export interface RoomSnapshot {
   createdAt: number;
   expiresAt: number;
   persistent: boolean;
+  passwordHash?: string;
+  passwordVersion?: number;
   participants: Participant[];
   messages: InternalMessage[];
 }
@@ -99,6 +115,8 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
     createdAt: now,
     expiresAt: persistent ? Number.POSITIVE_INFINITY : now + settings.roomTtlMs,
     persistent,
+    passwordHash: "",
+    passwordVersion: 1,
     participants: new Map(),
     sockets: new Map(),
     messages: [],
@@ -118,6 +136,67 @@ export function createRoom(options: CreateRoomOptions = {}): Room {
   return room;
 }
 
+/** Shortest password we accept — long enough not to be a slip, short enough to type. */
+export const MIN_ROOM_PASSWORD_LENGTH = 4;
+/** Longest accepted password, so pasting a whole document cannot wedge it. */
+export const MAX_ROOM_PASSWORD_LENGTH = 128;
+
+/** True when this room needs a password to enter. */
+export function isLocked(room: Pick<Room, "passwordHash">): boolean {
+  return room.passwordHash !== "";
+}
+
+/**
+ * Set or change this room's password. Stores only a hash, and bumps the access
+ * version, which is what invalidates every token issued under the old password
+ * (they are signed with a key derived from the hash).
+ */
+export function setRoomPassword(
+  room: Room,
+  password: string,
+): { ok: true } | { ok: false; error: string } {
+  const clean = password.normalize("NFKC").trim();
+  if (clean.length < MIN_ROOM_PASSWORD_LENGTH) {
+    return { ok: false, error: `Password must be at least ${MIN_ROOM_PASSWORD_LENGTH} characters.` };
+  }
+  if (clean.length > MAX_ROOM_PASSWORD_LENGTH) {
+    return { ok: false, error: `Password must be at most ${MAX_ROOM_PASSWORD_LENGTH} characters.` };
+  }
+  room.passwordHash = hashPassword(clean);
+  room.passwordVersion += 1;
+  persistRoom(room);
+  return { ok: true };
+}
+
+/** Remove the password: the room goes back to being open to anyone with the code. */
+export function clearRoomPassword(room: Room): void {
+  room.passwordHash = "";
+  room.passwordVersion += 1;
+  persistRoom(room);
+}
+
+/**
+ * Sign every saved device out without changing the password: existing tokens
+ * stop verifying, so the next join asks for the password again.
+ */
+export function revokeRoomAccess(room: Room): void {
+  room.passwordVersion += 1;
+  persistRoom(room);
+}
+
+/**
+ * Mark a room reserved. Reserved rooms never auto-expire, so they survive being
+ * left alone — and they are the ones a password is expected on.
+ */
+export function setReserved(room: Room, reserved: boolean): void {
+  if (room.persistent === reserved) return;
+  room.persistent = reserved;
+  // Reserving a room that has already timed out would be pointless, so give it
+  // a fresh long life; un-reserving hands it back to the normal TTL.
+  room.expiresAt = reserved ? Number.POSITIVE_INFINITY : Date.now() + getSettings().roomTtlMs;
+  persistRoom(room);
+}
+
 /** Take a JSON-safe copy of a room for Redis / cross-instance transport. */
 export function snapshotRoom(room: Room): RoomSnapshot {
   return {
@@ -127,6 +206,8 @@ export function snapshotRoom(room: Room): RoomSnapshot {
     createdAt: room.createdAt,
     expiresAt: room.persistent ? 0 : room.expiresAt,
     persistent: room.persistent,
+    passwordHash: room.passwordHash,
+    passwordVersion: room.passwordVersion,
     participants: [...room.participants.values()].map((p) => ({ ...p })),
     messages: room.messages.map((m) => ({ ...m })),
   };
@@ -141,6 +222,8 @@ export function restoreRoom(snapshot: RoomSnapshot): Room {
     createdAt: snapshot.createdAt,
     expiresAt: snapshot.persistent ? Number.POSITIVE_INFINITY : snapshot.expiresAt,
     persistent: snapshot.persistent,
+    passwordHash: snapshot.passwordHash ?? "",
+    passwordVersion: snapshot.passwordVersion ?? 1,
     participants: new Map(snapshot.participants.map((p) => [p.id, { ...p }])),
     sockets: new Map(),
     messages: snapshot.messages.map((m) => ({ ...m })),

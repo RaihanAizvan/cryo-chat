@@ -278,6 +278,8 @@ export interface AdminRoomSummary {
   createdAt: number;
   expiresAt: number;
   persistent: boolean;
+  /** True when the room needs a password to enter. Never the password itself. */
+  locked: boolean;
   hostId: string;
   participantCount: number;
   messageCount: number;
@@ -341,6 +343,7 @@ export type AdminAuditKind =
   | "media:upload"
   | "member:kicked"
   | "member:banned"
+  | "room:reserved"
   | "reserved:password:set"
   | "reserved:password:removed"
   | "reserved:access:revoked"
@@ -361,16 +364,6 @@ export interface AdminAuditEvent {
   detail?: string;
 }
 
-/** Access state of the reserved room, as shown in the admin console. */
-export interface ReservedRoomAccess {
-  /** True when a password is set, i.e. the room is locked. */
-  locked: boolean;
-  /** True when the reserved room is enabled at all. */
-  enabled: boolean;
-  /** The room's join code. */
-  code: string;
-}
-
 /** Runtime-tunable server settings (admin panel). */
 export interface AdminSettings {
   maxMessageLength: number;
@@ -387,7 +380,6 @@ export interface AdminSettings {
    * True when the reserved room has a password. The password itself is never
    * sent to a client — not even to the admin console.
    */
-  reservedRoomPasswordSet: boolean;
   /** When false, the app hides the voice-note (mic) button. */
   voiceNotesEnabled: boolean;
   adminEnabled: boolean;
