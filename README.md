@@ -17,7 +17,7 @@ hop in, talk, bounce, and the room melts away on its own.
 - **Rich messages.** Emoji picker with recents, WhatsApp-style large emoji, image upload, stickers, and reply quotes.
 - **Voice notes.** Record and send audio that plays back in the room.
 - **Moderation.** An admin console (`/admin`) with live rooms, users, audit trail, analytics, and settings you can turn on/off live.
-- **A reserved room, if you want one.** The always-open room behind a fixed code can be put behind a password, so the code alone doesn't let anyone in.
+- **Private rooms.** Anyone can put a password on their room and choose when it lapses. Non-hosts see the door closed instead of a wall of text.
 
 ![Home screen](docs/screenshots/home.png)
 
@@ -135,7 +135,11 @@ The honest trade-off: it's not for things you need to keep. It's for the here-an
 No. In-memory only, pruned by a timer. Nothing touches a disk database.
 
 **How do I put a password on a room?**
-Admin console → Rooms → Access, on any room. Set a password and that room asks for it. Visitors type it once; their device keeps a signed access token, so they aren't asked again until you change the password or revoke access. Changing it, or revoking access, signs every saved device out: their token stops working, so the next join asks again. Wrong guesses are rate limited, and the password is stored only as a hash. Each room has its own password — one room's never opens another.
+Whoever is hosting it opens the room menu → Room settings, and sets a password, optionally with an expiry (never, 7 days, or 30 days). Admins can do the same from Rooms → Access. Visitors type it once; their device keeps a signed access token, so they aren't asked again until you change the password or revoke access. Changing it, or revoking access, signs every saved device out: their token stops working, so the next join asks again. Wrong guesses are rate limited, and the password is stored only as a hash. Each room has its own password — one room's never opens another.
+
+Does it kick people out? No. A password change decides who gets in *next*; everyone already in the room stays. "Revoke access" is the deliberate version of that — it forces new passwords on anyone who isn't currently in the room.
+
+When an expiry lapses, the room goes back to being open. It doesn't lock out the people who were already inside.
 
 **What's the difference between a password and "reserved"?**
 A password decides who gets in. Reserved just means the room doesn't expire on its own. You can have either, or both.

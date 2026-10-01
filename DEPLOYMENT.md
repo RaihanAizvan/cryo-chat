@@ -27,7 +27,11 @@ Abasthan runs a persistent Node web service, so the whole app fits in one servic
 - **Start command:** `npm start`
 - **Environment variables:**
   - `PORT` — Abasthan injects this automatically; the server listens on it.
-  - `RESERVED_ROOM_CODE` — optional, default `9999`.
+  - `SPECIAL_ROOM_CODE` — optional, default `9999`. The code for the front-door
+    room, which is created reserved so it never ages out. This is env-only on
+    purpose: an admin can mark any room reserved, but the code itself is not
+    writable from the admin console. `RESERVED_ROOM_CODE` is still read as a
+    fallback for existing deployments.
   - `MAX_ROOM_SIZE` — optional, default `50`.
   - `CORS_ORIGIN` — optional; same-origin requests are allowed, so you generally
     don't need this. Set it only if a separate site connects to the socket.
@@ -79,10 +83,11 @@ and RAM stays flat.
 
 ## Room passwords (optional)
 
-Any room can be locked with its own password from **Rooms → Access** in the admin
-console. A four-character room code is easy to guess, so the password is what
-actually keeps a room private. Marking a room *reserved* is a separate switch:
-that just means it stops expiring on its own.
+Any room can be locked with its own password: the host does it from the room
+menu, and admins can do it from **Rooms → Access**. A four-character room code is
+easy to guess, so the password is what actually keeps a room private. Marking a
+room *reserved* is a separate switch, admin-only: that just means it stops
+expiring on its own.
 
 - **Set / change a password.** Stored as a salted scrypt hash, per room — no
   global password, so two rooms never share one. Changing it signs out every
