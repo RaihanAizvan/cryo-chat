@@ -112,6 +112,10 @@ export type ErrorCode =
   | "message_invalid"
   | "rate_limited"
   | "not_in_room"
+  /** The action needs the room host, and this socket is not the host. */
+  | "not_host"
+  /** The room host tried to set a password the server would not accept. */
+  | "room_password_rejected"
   | "banned";
 
 export interface ErrorPayload {

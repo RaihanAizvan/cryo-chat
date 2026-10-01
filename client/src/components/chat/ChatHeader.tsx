@@ -276,41 +276,49 @@ export function ChatHeader({
                 Rename {peer.name}
               </button>
             )}
-            {confirmingClear ? (
-              <div className="px-3 py-2">
-                <p className="mb-2 text-xs text-ink-muted">
-                  Clear all messages in this room?
-                </p>
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => {
-                      onClearChat();
-                      setMenuOpen(false);
-                      setConfirmingClear(false);
-                    }}
-                    className="flex-1 rounded-lg bg-rose-500/15 px-2 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/25"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    onClick={() => setConfirmingClear(false)}
-                    className="flex-1 rounded-lg bg-base-border px-2 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border2"
-                  >
-                    Cancel
-                  </button>
+            {room.isHost ? (
+              confirmingClear ? (
+                <div className="px-3 py-2">
+                  <p className="mb-2 text-xs text-ink-muted">
+                    Clear all messages in this room?
+                  </p>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => {
+                        onClearChat();
+                        setMenuOpen(false);
+                        setConfirmingClear(false);
+                      }}
+                      className="flex-1 rounded-lg bg-rose-500/15 px-2 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/25"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => setConfirmingClear(false)}
+                      className="flex-1 rounded-lg bg-base-border px-2 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-base-border2"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingClear(true)}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-base-border"
+                >
+                  <IconTrash width={15} height={15} className="text-ink-muted" />
+                  Clear chat
+                </button>
+              )
             ) : (
-              <button
-                onClick={() => setConfirmingClear(true)}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-base-border"
-              >
-                <IconTrash width={15} height={15} className="text-ink-muted" />
-                Clear chat
-              </button>
+              <div className="px-3 py-2 text-[11px] leading-snug text-ink-muted">
+                {room.participants.length > 1
+                  ? "The host manages this room."
+                  : "You're the only one here."}
+              </div>
             )}
             <div className="my-1 h-px bg-base-border" />
-            {room.persistent && (
+            {room.isHost && (
               <>
                 {confirmingClose ? (
                   <div className="px-3 py-2">

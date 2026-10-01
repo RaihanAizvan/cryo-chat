@@ -51,6 +51,38 @@ function activeMembership(socket: Socket): { room: rooms.Room; pid: string } | u
   return membership;
 }
 
+/**
+ * Gate for actions only the room host may take — clearing the chat, closing the
+ * room, changing whether the room is private.
+ *
+ * Until this existed, privileged actions were gated on membership alone, which
+ * meant any guest could wipe the transcript or tear the room down. Once the host
+ * owns the room password, "is this person the host" has to be an actual check
+ * rather than an assumption about who got in first.
+ *
+ * Host is inherited, not claimed: `removeParticipant` hands it to the first
+ * person still in the room, so this returns the seat's current owner rather than
+ * the original creator.
+ */
+function requireHost(
+  socket: Socket,
+  roomId: unknown,
+): { room: rooms.Room; pid: string } | null {
+  const membership = activeMembership(socket);
+  if (!membership || (typeof roomId === "string" && membership.room.id !== roomId)) {
+    sendError(socket, { code: "not_in_room", message: "You're not in that room." });
+    return null;
+  }
+  if (membership.pid !== membership.room.hostParticipantId) {
+    sendError(socket, {
+      code: "not_host",
+      message: "Only the host can do that.",
+    });
+    return null;
+  }
+  return membership;
+}
+
 function cancelDeparture(roomId: string, sessionId: string): void {
   const t = pendingDepartures.get(departKey(roomId, sessionId));
   if (t) {
@@ -333,11 +365,8 @@ export function attachHandlers(io: Server, socket: Socket): void {
 
   socket.on("room:close", (raw) => {
     const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
-    const membership = activeMembership(socket);
-    if (!membership || (roomId && membership.room.id !== roomId)) {
-      sendError(socket, { code: "not_in_room", message: "You're not in that room." });
-      return;
-    }
+    const membership = requireHost(socket, roomId);
+    if (!membership) return;
     closeRoom(io, membership.room);
   });
 
@@ -566,11 +595,8 @@ export function attachHandlers(io: Server, socket: Socket): void {
   // Clear all messages in a room.
   socket.on("room:clear", (raw) => {
     const roomId = typeof raw?.roomId === "string" ? raw.roomId : undefined;
-    const membership = activeMembership(socket);
-    if (!membership || (roomId && membership.room.id !== roomId)) {
-      sendError(socket, { code: "not_in_room", message: "You're not in that room." });
-      return;
-    }
+    const membership = requireHost(socket, roomId);
+    if (!membership) return;
     rooms.clearMessages(membership.room);
     const participant = rooms.participantForSocket(membership.room, socket.id);
     const name = participant?.name ?? "Someone";

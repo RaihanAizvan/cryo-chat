@@ -11,7 +11,7 @@ import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { io as createClient, type Socket } from "socket.io-client";
-import type { ErrorPayload, ServerToClientEventMap } from "@cryo/shared";
+import type { ErrorPayload, PublicMessage, PublicRoom, ServerToClientEventMap } from "@cryo/shared";
 
 const ADMIN_KEY = "test-admin-key-2026";
 const distPath = fileURLToPath(new URL("../dist/index.mjs", import.meta.url));
@@ -692,5 +692,70 @@ runIntegration("room passwords on the production bundle", () => {
       const room = await adminLocal(`/rooms/${roomId}`);
       expect((room.body.room as { locked: boolean }).locked).toBe(true);
     });
+  }, 40_000);
+
+  // Issue #64. These actions used to be gated on "is anyone in this room",
+  // which let any guest wipe the transcript or tear the room down.
+  it("only lets the host clear the chat or close the room", async () => {
+    const h = await bootServer();
+    try {
+      // Host creates the room; a second person joins it.
+      const a = makeClient(h.port);
+      const host = await a.connected;
+      await a.init;
+      const created = once<{ room: PublicRoom }>(host, "room:joined");
+      host.emit("room:create", {});
+      const room = (await created).room;
+      expect(room.isHost).toBe(true);
+
+      const b = makeClient(h.port);
+      const guest = await b.connected;
+      await b.init;
+      const joined = once<{ room: PublicRoom }>(guest, "room:joined");
+      guest.emit("room:join", { code: room.code });
+      expect((await joined).room.isHost).toBe(false);
+
+      // The guest cannot clear the chat.
+      const refused = once<ErrorPayload>(guest, "error");
+      guest.emit("room:clear", { roomId: room.id });
+      expect((await refused).code).toBe("not_host");
+
+      // ...nor close the room.
+      const refusedClose = once<ErrorPayload>(guest, "error");
+      guest.emit("room:close", { roomId: room.id });
+      expect((await refusedClose).code).toBe("not_host");
+
+      // The host can. The guest watched the message arrive, and watches it go.
+      host.emit("message:send", { roomId: room.id, text: "before the clear" });
+      const arrived = once<{ message: PublicMessage }>(guest, "message:new");
+      await arrived;
+      const cleared = once(guest, "message:cleared");
+      host.emit("room:clear", { roomId: room.id });
+      await cleared;
+
+      // Host leaves: the seat is inherited, so the guest — who was just told
+      // "only the host can do that" — now is the host. (The former host is
+      // out of the room entirely and cannot act on it any more.)
+      const hostGone = once<{ participantId: string }>(guest, "presence:left");
+      host.emit("room:leave", { roomId: room.id });
+      await hostGone;
+
+      const spoken = once<{ message: PublicMessage }>(guest, "message:new");
+      guest.emit("message:send", { roomId: room.id, text: "after the host left" });
+      await spoken;
+
+      const clearedByNewHost = once(guest, "message:cleared");
+      guest.emit("room:clear", { roomId: room.id });
+      await clearedByNewHost;
+
+      // And the room can be closed by the host too.
+      const closed = once(guest, "room:closed");
+      guest.emit("room:close", { roomId: room.id });
+      await closed;
+
+      guest.disconnect();
+    } finally {
+      await h.stop();
+    }
   }, 40_000);
 });
