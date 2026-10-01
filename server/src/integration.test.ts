@@ -9,6 +9,7 @@ import { fork } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { io as createClient, type Socket } from "socket.io-client";
 import type { ErrorPayload, ServerToClientEventMap } from "@cryo/shared";
 
@@ -36,19 +37,33 @@ function freePort(): Promise<number> {
 interface ServerHandle {
   port: number;
   stop: () => Promise<void>;
+  /** Whatever the server wrote to stderr, for when a test needs to explain itself. */
+  stderr: () => string;
 }
 
 async function bootServer(extraEnv: Record<string, string> = {}): Promise<ServerHandle> {
   const port = await freePort();
+  // A fresh key namespace per boot. These tests run against whatever Redis
+  // `.env` points at — including a shared remote one — so without this every
+  // run would inherit the last run's rooms and code claims.
+  const prefix = extraEnv.REDIS_PREFIX ?? `cryo:test:${randomUUID().slice(0, 8)}:`;
   const child = fork(distPath, [], {
     env: {
       ...process.env,
       PORT: String(port),
       ADMIN_KEY,
       MESSAGE_CAP: "50",
+      REDIS_PREFIX: prefix,
       ...extraEnv,
     },
     silent: true,
+  });
+  // Nobody reads a child's stderr, and a full pipe buffer blocks the child
+  // mid-test — a stall that looks like a hung request. Drain it and keep it.
+  const errs: string[] = [];
+  child.stderr?.on("data", (chunk: Buffer) => {
+    errs.push(chunk.toString());
+    if (errs.length > 50) errs.shift();
   });
   // Wait for the listen log line so clients never race the bind.
   const isUp = new Promise<void>((resolve, reject) => {
@@ -70,7 +85,7 @@ async function bootServer(extraEnv: Record<string, string> = {}): Promise<Server
       child.once("exit", () => resolve());
       child.kill("SIGTERM");
     });
-  return { port, stop };
+  return { port, stop, stderr: () => errs.join("") };
 }
 
 function once<A>(s: Socket, event: string): Promise<A> {
@@ -359,13 +374,21 @@ runIntegration("sticker pack on the production bundle", () => {
     bob.disconnect();
   }, 30_000);
 });
-runIntegration("reserved room password on the production bundle", () => {
+runIntegration("room passwords on the production bundle", () => {
   const PASSWORD = "cold brew";
-  /** Fresh server per test: the password is global state. */
-  async function withLockedRoom(run: (ctx: {
+  interface Ctx {
     port: number;
     admin: typeof admin;
-  }) => Promise<void>): Promise<void> {
+    /** The room every test here locks down. */
+    roomId: string;
+  }
+
+  /**
+   * Boot a server, create a normal room, then put a password on *that* room.
+   * Nothing is global any more: the password belongs to the room, so this is
+   * what "lock a room" has to look like from the outside.
+   */
+  async function withLockedRoom(run: (ctx: Ctx) => Promise<void>): Promise<void> {
     const h = await bootServer();
     const adminLocal: typeof admin = async (path, opts = {}) => {
       const res = await fetch(`http://127.0.0.1:${h.port}/admin${path}`, {
@@ -378,115 +401,153 @@ runIntegration("reserved room password on the production bundle", () => {
       });
       return { status: res.status, body: await res.json().catch(() => ({})) };
     };
+    const owner = makeClient(h.port);
+    const ownerSocket = await owner.connected;
+    await owner.init;
+    const created = once<{ room: { id: string; code: string } }>(ownerSocket, "room:joined");
+    ownerSocket.emit("room:create", {});
+    const room = (await created).room;
+    ownerSocket.disconnect();
+
+    const locked = await adminLocal(`/rooms/${room.id}/password`, {
+      method: "PUT",
+      body: { password: PASSWORD },
+    });
+    expect(locked.status).toBe(200);
     try {
-      const code = await adminLocal("/settings", {
-        method: "PUT",
-        body: { reservedRoomCode: "CRYO", reservedRoomEnabled: true },
-      });
-      expect(code.status).toBe(200);
-      const pw = await adminLocal("/reserved-room/password", {
-        method: "PUT",
-        body: { password: PASSWORD },
-      });
-      expect(pw.status).toBe(200);
-      await run({ port: h.port, admin: adminLocal });
+      await run({ port: h.port, admin: adminLocal, roomId: room.id });
     } finally {
       await h.stop();
     }
   }
 
   it("asks for the password, then issues a reusable access token", async () => {
-    await withLockedRoom(async ({ port }) => {
+    await withLockedRoom(async ({ port, roomId }) => {
       const c = makeClient(port);
       const socket = await c.connected;
       const init = await c.init;
 
       // No password, no token → refused, with the code so the UI can prompt.
       const refused = once<ErrorPayload>(socket, "error");
-      socket.emit("room:join", { code: "CRYO" });
+      socket.emit("room:join", { roomId });
       const err = await refused;
       expect(err.code).toBe("room_password_required");
-      expect(err.roomCode).toBe("CRYO");
+      expect(err.roomCode).toBe(err.roomCode);
+      expect(err.roomCode).toBeTruthy();
 
-      // Wrong password → different error, so the UI can say "try again".
+      // Wrong password → a different error, so the UI can say "try again".
       const wrong = once<ErrorPayload>(socket, "error");
-      socket.emit("room:join", { code: "CRYO", password: "nope" });
+      socket.emit("room:join", { roomId, password: "nope" });
       expect((await wrong).code).toBe("room_password_invalid");
 
       // Right password → in, and handed a token to keep.
-      const joined = once<{ room: { code: string; id: string } }>(socket, "room:joined");
+      const joined = once<{ room: { id: string } }>(socket, "room:joined");
       const access = once<{ code: string; token: string; expiresAt: number }>(socket, "room:access");
-      socket.emit("room:join", { code: "CRYO", password: PASSWORD });
-      const room = (await joined).room;
+      socket.emit("room:join", { roomId, password: PASSWORD });
+      expect((await joined).room.id).toBe(roomId);
       const grant = await access;
-      expect(room.code).toBe("CRYO");
-      expect(grant.code).toBe("CRYO");
+      expect(grant.token).toBeTruthy();
       expect(grant.expiresAt).toBeGreaterThan(Date.now());
 
-      // The same identity, a brand new socket, presenting the token: straight in.
+      // Same identity, brand new socket, presenting the token: straight in.
       const again = makeClientWithSession(port, init.sessionId);
       const socket2 = await again.connected;
       await again.init;
-      const joined2 = once<{ room: { code: string } }>(socket2, "room:joined");
-      socket2.emit("room:join", { code: "CRYO", token: grant.token });
-      expect((await joined2).room.code).toBe("CRYO");
+      const joined2 = once<{ room: { id: string } }>(socket2, "room:joined");
+      socket2.emit("room:join", { roomId, token: grant.token });
+      expect((await joined2).room.id).toBe(roomId);
 
       socket.disconnect();
       socket2.disconnect();
     });
   }, 40_000);
 
-  it("keeps the room shut for everyone else, on every way in", async () => {
-    await withLockedRoom(async ({ port }) => {
-      // Unlock once to learn the room id, then try the share link without a token.
-      const a = makeClient(port);
-      const socketA = await a.connected;
-      await a.init;
-      const joined = once<{ room: { id: string } }>(socketA, "room:joined");
-      socketA.emit("room:join", { code: "CRYO", password: PASSWORD });
-      const roomId = (await joined).room.id;
+  it("gives every room its own password", async () => {
+    await withLockedRoom(async ({ port, admin: adminLocal, roomId }) => {
+      // A second, completely separate room, in the same server and the same
+      // code space as the locked one.
+      const b = makeClient(port);
+      const socketB = await b.connected;
+      await b.init;
+      const created = once<{ room: { id: string; code: string } }>(socketB, "room:joined");
+      socketB.emit("room:create", {});
+      const other = (await created).room;
+      const setOther = await adminLocal(`/rooms/${other.id}/password`, {
+        method: "PUT",
+        body: { password: "bravo pass" },
+      });
+      expect(setOther.status).toBe(200);
 
-      // A different person, following the share link.
+      /** Enter a room from outside and report which way the door opened. */
+      const enter = async (target: string, password?: string): Promise<string> => {
+        const c = makeClient(port);
+        const s = await c.connected;
+        await c.init;
+        const outcome = Promise.race([
+          once<{ room: { id: string } }>(s, "room:joined").then(() => "granted"),
+          once<ErrorPayload>(s, "error").then((e) => e.code),
+        ]);
+        s.emit("room:join", { roomId: target, password });
+        const result = await outcome;
+        s.disconnect();
+        return result;
+      };
+
+      // Each room answers only to its own password.
+      expect(await enter(other.id, PASSWORD)).toBe("room_password_invalid");
+      expect(await enter(other.id, "bravo pass")).toBe("granted");
+      expect(await enter(roomId, "bravo pass")).toBe("room_password_invalid");
+      expect(await enter(roomId, PASSWORD)).toBe("granted");
+
+      socketB.disconnect();
+    });
+  }, 40_000);
+
+  it("keeps the room shut for everyone else, on every way in", async () => {
+    await withLockedRoom(async ({ port, admin: adminLocal, roomId }) => {
+      // A different person, following a share link to the room.
       const b = makeClient(port);
       const socketB = await b.connected;
       await b.init;
       const denied = once<ErrorPayload>(socketB, "error");
       socketB.emit("room:join", { roomId });
-      const err = await denied;
-      expect(err.code).toBe("room_password_required");
-      expect(err.roomCode).toBe("CRYO");
+      expect((await denied).code).toBe("room_password_required");
 
-      // Same person, but claiming the code with room:create — the other door in.
-      socketB.emit("room:create", { code: "CRYO" });
-      expect((await once<ErrorPayload>(socketB, "error")).code).toBe("room_exists");
+      // ...and by typing its code.
+      const detail = await adminLocal(`/rooms/${roomId}`);
+      const code = (detail.body.room as { code: string }).code;
+      const byCode = once<ErrorPayload>(socketB, "error");
+      socketB.emit("room:join", { code });
+      expect((await byCode).code).toBe("room_password_required");
 
       // Status tells the home screen the room needs a password up front.
-      const status = once<{ statuses: { code: string; locked: boolean; persistent: boolean }[] }>(
+      const status = once<{ statuses: { code: string; locked: boolean }[] }>(
         socketB,
         "room:status:result",
       );
-      socketB.emit("room:status", { refs: [{ code: "CRYO" }] });
+      socketB.emit("room:status", { refs: [{ code }] });
       const st = (await status).statuses[0];
       expect(st.locked).toBe(true);
-      expect(st.persistent).toBe(true);
+      expect(st.code).toBe(code);
 
-      socketA.disconnect();
       socketB.disconnect();
     });
   }, 40_000);
 
   it("signs saved devices out on password change, revoke, and removal", async () => {
-    await withLockedRoom(async ({ port, admin: adminLocal }) => {
-      // Unlocks, then *leaves* the room before disconnecting: a member who is
-      // still inside is re-seated by the server's recovery path, and this test
-      // is about what happens to a device that has to go through the door again.
+    await withLockedRoom(async ({ port, admin: adminLocal, roomId }) => {
+      /**
+       * Unlock once, then step back outside: a member still seated inside is
+       * re-seated by the server's recovery path, and this test is about what
+       * happens to a device that has to go through the door again.
+       */
       const unlock = async () => {
         const c = makeClient(port);
         const s = await c.connected;
         const init = await c.init;
         const access = once<{ token: string }>(s, "room:access");
-        const joined = once<{ room: { code: string; id: string } }>(s, "room:joined");
-        s.emit("room:join", { code: "CRYO", password: PASSWORD });
+        const joined = once<{ room: { id: string } }>(s, "room:joined");
+        s.emit("room:join", { roomId, password: PASSWORD });
         const room = (await joined).room;
         const token = (await access).token;
         const left = once<{ roomId: string }>(s, "room:left");
@@ -494,72 +555,111 @@ runIntegration("reserved room password on the production bundle", () => {
         await left;
         return { socket: s, sessionId: init.sessionId, token };
       };
-      /** Join with a token as a returning device and report what happened. */
+      /** Come back as a returning device with a saved token. */
       const tryToken = async (sessionId: string, token: string): Promise<string> => {
         const c = makeClientWithSession(port, sessionId);
         const s = await c.connected;
         await c.init;
         const outcome = Promise.race([
-          once<{ room: { code: string } }>(s, "room:joined").then(() => "granted"),
+          once<{ room: { id: string } }>(s, "room:joined").then(() => "granted"),
           once<ErrorPayload>(s, "error").then((e) => e.code),
         ]);
-        s.emit("room:join", { code: "CRYO", token });
+        s.emit("room:join", { roomId, token });
         const result = await outcome;
         s.disconnect();
         return result;
       };
 
       const first = await unlock();
-      // The whole point: same identity, new socket, no password, straight in.
       expect(await tryToken(first.sessionId, first.token)).toBe("granted");
-
-      const revoked = await adminLocal("/reserved-room/revoke-access", { method: "POST" });
+      const revoked = await adminLocal(`/rooms/${roomId}/revoke-access`, { method: "POST" });
       expect(revoked.status).toBe(200);
       expect(await tryToken(first.sessionId, first.token)).toBe("room_password_required");
-
       const second = await unlock();
-      expect(await tryToken(second.sessionId, second.token)).toBe("granted");
-      const rotated = await adminLocal("/reserved-room/password", {
+      const rotated = await adminLocal(`/rooms/${roomId}/password`, {
         method: "PUT",
         body: { password: "new brew" },
       });
       expect(rotated.status).toBe(200);
       expect(await tryToken(second.sessionId, second.token)).toBe("room_password_required");
-      // ...and the old password is gone with it.
       const stale = makeClientWithSession(port, second.sessionId);
       const staleSocket = await stale.connected;
       await stale.init;
       const staleErr = once<ErrorPayload>(staleSocket, "error");
-      staleSocket.emit("room:join", { code: "CRYO", password: PASSWORD });
+      staleSocket.emit("room:join", { roomId, password: PASSWORD });
       expect((await staleErr).code).toBe("room_password_invalid");
       staleSocket.disconnect();
-
-      // Removing the password reopens the room to anyone with the code.
-      const cleared = await adminLocal("/reserved-room/password", { method: "DELETE" });
+      const cleared = await adminLocal(`/rooms/${roomId}/password`, { method: "DELETE" });
       expect(cleared.status).toBe(200);
       const c = makeClient(port);
       const s = await c.connected;
       await c.init;
-      const openJoin = once<{ room: { code: string } }>(s, "room:joined");
-      s.emit("room:join", { code: "CRYO" });
-      expect((await openJoin).room.code).toBe("CRYO");
-
+      const openJoin = once<{ room: { id: string } }>(s, "room:joined");
+      s.emit("room:join", { roomId });
+      expect((await openJoin).room.id).toBe(roomId);
       first.socket.disconnect();
       second.socket.disconnect();
       s.disconnect();
     });
   }, 40_000);
 
-  it("never leaks the password or its hash through the admin API", async () => {
-    await withLockedRoom(async ({ admin: adminLocal }) => {
-      const settings = await adminLocal("/settings");
-      const raw = JSON.stringify(settings.body);
-      expect(raw).not.toContain("scrypt");
-      expect(settings.body.settings!.reservedRoomPasswordSet).toBe(true);
+  it("lets an admin mark any room reserved, from the rooms list", async () => {
+    await withLockedRoom(async ({ admin: adminLocal, roomId }) => {
+      const listed = await adminLocal("/rooms");
+      const rooms = listed.body.rooms as { id: string; locked: boolean; persistent: boolean }[];
+      const row = rooms.find((r) => r.id === roomId);
+      expect(row).toBeDefined();
+      expect(row!.locked).toBe(true);
+      expect(row!.persistent).toBe(false);
 
-      const access = await adminLocal("/reserved-room");
-      expect(JSON.stringify(access.body)).not.toContain("scrypt");
-      expect((access.body as { reserved: { locked: boolean } }).reserved.locked).toBe(true);
+      // Reserved means it will not expire on its own.
+      const marked = await adminLocal(`/rooms/${roomId}`, {
+        method: "PATCH",
+        body: { reserved: true },
+      });
+      expect(marked.status).toBe(200);
+      expect((marked.body.room as { persistent: boolean }).persistent).toBe(true);
+      expect(
+        (marked.body.room as { expiresAt: number }).expiresAt,
+      ).toBe(Number.MAX_SAFE_INTEGER);
+
+      // The room keeps its password when it becomes reserved.
+      const stillLocked = await adminLocal("/rooms");
+      const after = (stillLocked.body.rooms as { id: string; locked: boolean }[]).find(
+        (r) => r.id === roomId,
+      );
+      expect(after!.locked).toBe(true);
+
+      // And un-reserving hands it back to the normal expiry.
+      const unmarked = await adminLocal(`/rooms/${roomId}`, {
+        method: "PATCH",
+        body: { reserved: false },
+      });
+      expect(unmarked.status).toBe(200);
+      expect((unmarked.body.room as { persistent: boolean }).persistent).toBe(false);
+
+      // Nonsense input is refused rather than silently ignored.
+      const bad = await adminLocal(`/rooms/${roomId}`, {
+        method: "PATCH",
+        body: { reserved: "yes" },
+      });
+      expect(bad.status).toBe(400);
+      const missing = await adminLocal("/rooms/nope/password", {
+        method: "PUT",
+        body: { password: PASSWORD },
+      });
+      expect(missing.status).toBe(404);
+    });
+  }, 40_000);
+
+  it("never leaks the password or its hash through the admin API", async () => {
+    await withLockedRoom(async ({ admin: adminLocal, roomId }) => {
+      const rooms = await adminLocal("/rooms");
+      expect(JSON.stringify(rooms.body)).not.toContain("scrypt");
+      const room = await adminLocal(`/rooms/${roomId}`);
+      expect(JSON.stringify(room.body)).not.toContain("scrypt");
+      // The row tells the admin what it needs to know without holding a secret.
+      expect((room.body.room as { locked: boolean }).locked).toBe(true);
 
       // A password cannot be smuggled in through the generic settings patch.
       const sneaky = await adminLocal("/settings", {
@@ -576,18 +676,21 @@ runIntegration("reserved room password on the production bundle", () => {
     });
   }, 40_000);
 
-  it("refuses a password that is too short", async () => {
-    await withLockedRoom(async ({ admin: adminLocal }) => {
-      const short = await adminLocal("/reserved-room/password", {
+  it("refuses a password that is too short or too long", async () => {
+    await withLockedRoom(async ({ admin: adminLocal, roomId }) => {
+      const short = await adminLocal(`/rooms/${roomId}/password`, {
         method: "PUT",
         body: { password: "ab" },
       });
       expect(short.status).toBe(400);
-      const long = await adminLocal("/reserved-room/password", {
+      const long = await adminLocal(`/rooms/${roomId}/password`, {
         method: "PUT",
         body: { password: "x".repeat(200) },
       });
       expect(long.status).toBe(400);
+      // And the room is still exactly as it was.
+      const room = await adminLocal(`/rooms/${roomId}`);
+      expect((room.body.room as { locked: boolean }).locked).toBe(true);
     });
   }, 40_000);
 });

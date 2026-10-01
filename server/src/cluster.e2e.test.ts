@@ -85,6 +85,10 @@ async function bootInstance(extraEnv: Record<string, string>): Promise<ServerHan
     env: { ...process.env, PORT: String(port), ADMIN_KEY, MESSAGE_CAP: "50", ...extraEnv },
     silent: true,
   });
+  // `silent` gives the child pipes that nobody reads. An undrained stderr fills
+  // its buffer and stalls the child mid-test, which surfaces as a mystery
+  // timeout rather than as a server error.
+  child.stderr?.resume();
   const isUp = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("server failed to boot")), 15_000);
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -269,7 +273,7 @@ runCluster("cross-instance moderation (shared Redis)", () => {
     bob.disconnect();
   }, 60_000);
 });
-runCluster("reserved-room password is shared across instances (shared Redis)", () => {
+runCluster("room passwords are shared across instances (shared Redis)", () => {
   /** Like `once`, but names the event that never arrived instead of hanging. */
   function soon<A>(s: Socket, event: string, ms = 10_000): Promise<A> {
     return new Promise((res, rej) => {
@@ -290,12 +294,12 @@ runCluster("reserved-room password is shared across instances (shared Redis)", (
     instA = await bootInstance({
       REDIS_URL: redisUrl,
       REDIS_PREFIX: prefix,
-      INSTANCE_ID: "reserved-cluster-a",
+      INSTANCE_ID: "roomkey-cluster-a",
     });
     instB = await bootInstance({
       REDIS_URL: redisUrl,
       REDIS_PREFIX: prefix,
-      INSTANCE_ID: "reserved-cluster-b",
+      INSTANCE_ID: "roomkey-cluster-b",
     });
     adminA = adminFor(instA.port);
     adminB = adminFor(instB.port);
@@ -306,40 +310,43 @@ runCluster("reserved-room password is shared across instances (shared Redis)", (
   }, 15_000);
 
   it("enforces one password and one signing key on every instance", async () => {
-    // Configure and lock the reserved room through instance A only.
-    const code = await adminA("/settings", {
-      method: "PUT",
-      body: { reservedRoomCode: "CRYO", reservedRoomEnabled: true },
-    });
-    expect(code.status).toBe(200);
-    const locked = await adminA("/reserved-room/password", {
+    // Create the room on A, then lock it through A's admin API only. B has
+    // never heard of this room: it learns the password from the shared store,
+    // exactly as a second instance behind a load balancer would.
+    const owner = makeClient(instA.port);
+    const socketO = await owner.connected;
+    await owner.init;
+    const created = soon<{ room: { id: string; code: string } }>(socketO, "room:joined");
+    socketO.emit("room:create", {});
+    const room = (await created).room;
+    const locked = await adminA(`/rooms/${room.id}/password`, {
       method: "PUT",
       body: { password: "cold brew" },
     });
     expect(locked.status).toBe(200);
 
-    // Instance B learned about it through the settings broadcast.
-    await new Promise((r) => setTimeout(r, 500));
-    const viewB = await adminB("/reserved-room");
-    expect((viewB.body as { reserved: { locked: boolean; code: string } }).reserved).toMatchObject({
-      locked: true,
-      code: "CRYO",
-    });
+    // Instance B's own room list shows it as locked: the hash reached Redis and
+    // came back, rather than the room quietly being wide open.
+    const listB = await adminB("/rooms");
+    const rowB = (listB.body as { rooms: { id: string; locked: boolean }[] }).rooms.find(
+      (r) => r.id === room.id,
+    );
+    expect(rowB?.locked).toBe(true);
 
-    // ...and enforces it.
+    // ...and B enforces it.
     const bob = makeClient(instB.port);
     const socketB = await bob.connected;
     const bobInit = await bob.init;
     const denied = soon<ErrorPayload>(socketB, "error");
-    socketB.emit("room:join", { code: "CRYO" });
+    socketB.emit("room:join", { roomId: room.id });
     expect((await denied).code).toBe("room_password_required");
 
     // Unlocking on B yields a token that A accepts: the signing key is derived
     // from the shared password hash, not from per-instance state.
     const joined = soon<{ room: { code: string } }>(socketB, "room:joined");
     const access = soon<{ token: string }>(socketB, "room:access");
-    socketB.emit("room:join", { code: "CRYO", password: "cold brew" });
-    expect((await joined).room.code).toBe("CRYO");
+    socketB.emit("room:join", { roomId: room.id, password: "cold brew" });
+    expect((await joined).room.code).toBe(room.code);
     const { token } = await access;
 
     // Same identity, landed on the *other* instance: this is the leg that proves
@@ -348,24 +355,98 @@ runCluster("reserved-room password is shared across instances (shared Redis)", (
     const socketA = await alice.connected;
     await alice.init;
     const joinedA = soon<{ room: { code: string } }>(socketA, "room:joined");
-    socketA.emit("room:join", { code: "CRYO", token });
-    expect((await joinedA).room.code).toBe("CRYO");
+    socketA.emit("room:join", { roomId: room.id, token });
+    expect((await joinedA).room.code).toBe(room.code);
 
     // A revoke on A invalidates the token B handed out. Checked from a *fresh*
     // identity: an identity that is already a member is deliberately re-seated
     // on reconnect by the server's recovery path, without a password check.
-    const revoke = await adminA("/reserved-room/revoke-access", { method: "POST" });
+    const revoke = await adminA(`/rooms/${room.id}/revoke-access`, { method: "POST" });
     expect(revoke.status).toBe(200);
     await new Promise((r) => setTimeout(r, 500));
     const dave = makeClient(instB.port);
     const socketD = await dave.connected;
     await dave.init;
     const afterRevoke = soon<ErrorPayload>(socketD, "error");
-    socketD.emit("room:join", { code: "CRYO", token });
+    socketD.emit("room:join", { roomId: room.id, token });
     expect((await afterRevoke).code).toBe("room_password_required");
 
+    // Rotating the password on A changes what B accepts, and both instances end
+    // up signing with the new hash.
+    const rotated = await adminA(`/rooms/${room.id}/password`, {
+      method: "PUT",
+      body: { password: "new brew" },
+    });
+    expect(rotated.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 500));
+    const erin = makeClient(instB.port);
+    const socketE = await erin.connected;
+    const erinInit = await erin.init;
+    const stale = soon<ErrorPayload>(socketE, "error");
+    socketE.emit("room:join", { roomId: room.id, password: "cold brew" });
+    expect((await stale).code).toBe("room_password_invalid");
+    const joinedE = soon<{ room: { code: string } }>(socketE, "room:joined");
+    const accessE = soon<{ token: string }>(socketE, "room:access");
+    socketE.emit("room:join", { roomId: room.id, password: "new brew" });
+    expect((await joinedE).room.code).toBe(room.code);
+    const erinToken = (await accessE).token;
+    const frank = makeClient(instA.port, erinInit.sessionId);
+    const socketF = await frank.connected;
+    await frank.init;
+    const joinedF = soon<{ room: { code: string } }>(socketF, "room:joined");
+    socketF.emit("room:join", { roomId: room.id, token: erinToken });
+    expect((await joinedF).room.code).toBe(room.code);
+
+    socketO.disconnect();
     socketA.disconnect();
     socketB.disconnect();
     socketD.disconnect();
+    socketE.disconnect();
+    socketF.disconnect();
+  }, 60_000);
+
+  it("keeps each room's password to itself", async () => {
+    // Two rooms, locked from the same admin key on two instances. Neither
+    // password opens the other room.
+    const mk = async (port: number) => {
+      const c = makeClient(port);
+      const s = await c.connected;
+      await c.init;
+      const joined = soon<{ room: { id: string; code: string } }>(s, "room:joined");
+      s.emit("room:create", {});
+      return { socket: s, room: (await joined).room };
+    };
+    const one = await mk(instA.port);
+    const two = await mk(instB.port);
+    expect(
+      (await adminA(`/rooms/${one.room.id}/password`, { method: "PUT", body: { password: "alpha pass" } }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await adminB(`/rooms/${two.room.id}/password`, { method: "PUT", body: { password: "bravo pass" } }))
+        .status,
+    ).toBe(200);
+
+    const tryPassword = async (roomId: string, password: string): Promise<string> => {
+      const c = makeClient(instB.port);
+      const s = await c.connected;
+      await c.init;
+      const outcome = Promise.race([
+        soon<{ room: { id: string } }>(s, "room:joined", 10_000).then(() => "granted"),
+        soon<ErrorPayload>(s, "error", 10_000).then((e) => e.code),
+      ]);
+      s.emit("room:join", { roomId, password });
+      const result = await outcome;
+      s.disconnect();
+      return result;
+    };
+
+    expect(await tryPassword(one.room.id, "alpha pass")).toBe("granted");
+    expect(await tryPassword(two.room.id, "alpha pass")).toBe("room_password_invalid");
+    expect(await tryPassword(two.room.id, "bravo pass")).toBe("granted");
+    expect(await tryPassword(one.room.id, "bravo pass")).toBe("room_password_invalid");
+
+    one.socket.disconnect();
+    two.socket.disconnect();
   }, 60_000);
 });
