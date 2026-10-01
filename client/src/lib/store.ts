@@ -13,7 +13,7 @@ import { getStoredDisplayName, getStoredSessionId, setStoredSessionId } from "./
 const serverUrl = import.meta.env.VITE_SERVER_URL?.trim();
 // Reuse a previously persisted session id so reconnects keep the same identity
 // (keeps the user's own historical messages right-aligned).
-const savedSessionId = getStoredSessionId();
+let currentSessionId = getStoredSessionId();
 export const socket: Socket = io(serverUrl || "/", {
   autoConnect: false,
   path: "/socket.io",
@@ -24,8 +24,22 @@ export const socket: Socket = io(serverUrl || "/", {
   reconnectionDelayMax: 5000,
   randomizationFactor: 0.5,
   timeout: 10_000,
-  query: savedSessionId ? { sessionId: savedSessionId } : undefined,
+  query: currentSessionId ? { sessionId: currentSessionId } : undefined,
 });
+
+/**
+ * Point every future reconnect at the identity the server just handed us.
+ *
+ * The `query` above is only read when the socket is created, so without this
+ * an id assigned on `session:init` would never travel with a reconnect: the
+ * server would see no id, mint a fresh identity, and every blip or background
+ * wake-up would pile up another user in the session list.
+ */
+function rememberSessionId(id: string | null): void {
+  if (!id || id === currentSessionId) return;
+  currentSessionId = id;
+  socket.io.opts.query = { ...socket.io.opts.query, sessionId: id };
+}
 
 // Timestamps used by useChatRoom to tell a fast background-recovery from a
 // long drop (only the latter needs an explicit re-join).
@@ -109,7 +123,10 @@ socket.on("session:init", (data) => {
   voiceNotesEnabled.set(data.voiceNotesEnabled !== false);
   connectionStatus.set("connected");
   // Remember our identity so reconnects/reloads keep the same session.
-  if (data.sessionId) setStoredSessionId(data.sessionId);
+  if (data.sessionId) {
+    setStoredSessionId(data.sessionId);
+    rememberSessionId(data.sessionId);
+  }
 
   // A display name the user saved earlier takes precedence over the random
   // one the server just assigned.

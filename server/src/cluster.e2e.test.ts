@@ -18,6 +18,7 @@ import { existsSync } from "node:fs";
 import { createServer, createConnection } from "node:net";
 import { fileURLToPath } from "node:url";
 import { io as createClient, type Socket } from "socket.io-client";
+import Redis from "ioredis";
 import type {
   ErrorPayload,
   ServerToClientEventMap,
@@ -111,11 +112,12 @@ function once<A>(s: Socket, event: string): Promise<A> {
   return new Promise((resolve) => s.once(event, (d: A) => resolve(d)));
 }
 
-function makeClient(port: number) {
+function makeClient(port: number, query?: { sessionId: string }) {
   const s = createClient(`http://127.0.0.1:${port}`, {
     path: "/socket.io",
     transports: ["websocket"],
     timeout: 8000,
+    query,
   });
   const connected = new Promise<Socket>((resolve, reject) => {
     s.once("connect", () => resolve(s));
@@ -267,4 +269,34 @@ runCluster("cross-instance moderation (shared Redis)", () => {
     alice.disconnect();
     bob.disconnect();
   }, 60_000);
+
+  it("resumes the same identity on another instance and keeps its Redis row alive", async () => {
+    const redis = new Redis(redisUrl);
+    try {
+      // First visit: no id, so the server mints one.
+      const first = makeClient(instA.port);
+      await first.connected;
+      const firstInit = await first.init;
+      first.socket.disconnect();
+
+      // Reconnect carrying that id — but to the OTHER instance. This is the
+      // path that used to break whenever a client landed somewhere else, and
+      // every miss minted yet another user for the same person.
+      const second = makeClient(instB.port, { sessionId: firstInit.sessionId });
+      await second.connected;
+      const secondInit = await second.init;
+      expect(secondInit.sessionId).toBe(firstInit.sessionId);
+      expect(secondInit.name).toBe(firstInit.name);
+
+      const key = `${prefix}:session:${firstInit.sessionId}`;
+      const row = await redis.hgetall(key);
+      expect(Number(row.lastSeenAt)).toBeGreaterThanOrEqual(Number(row.createdAt));
+      // Every save rewrites the TTL, so a returning user never silently
+      // expires out of their own session after 7 days.
+      expect(await redis.ttl(key)).toBeGreaterThan(6 * 24 * 3600);
+      second.socket.disconnect();
+    } finally {
+      redis.disconnect();
+    }
+  }, 30_000);
 });
