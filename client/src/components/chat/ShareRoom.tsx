@@ -3,7 +3,6 @@ import type { PublicRoom, Participant } from "@cryo/shared";
 import { Avatar } from "../ui/Avatar";
 import { IconCopy, IconCheck, IconLink, IconLock } from "../ui/Icon";
 import { roomShareLink } from "../../lib/shareLink";
-import { getRoomKey } from "../../lib/roomKey";
 
 interface Props {
   room: PublicRoom;
@@ -112,15 +111,17 @@ export function ShareRoom({ room, participants, selfId }: Props) {
             </>
           )}
         </button>
-        {/* A token for this room only exists if the room asked for a password,
-            so this is an honest signal — and the person you invite will hit it. */}
-        {getRoomKey(room.code) && (
+        {/* Driven by the room's own lock state, not by whether *this* device
+            happens to hold a token. The host is the one who needs the warning,
+            and before they had unlocked anything that check was false — so the
+            person sending the invite never saw the note. */}
+        {room.locked && (
           <p className="flex items-start gap-2 rounded-xl bg-base-sunken px-3 py-2.5 text-left text-xs text-ink-faint">
             <IconLock width={14} height={14} className="mt-px shrink-0" />
             <span>
-              This room is password protected. Whoever you invite will be asked
-              for the password after opening the link — send it to them
-              separately, never in the same message.
+              This room is private. Whoever you invite will be asked for the
+              password after opening the link — send it to them separately,
+              never in the same message.
             </span>
           </p>
         )}

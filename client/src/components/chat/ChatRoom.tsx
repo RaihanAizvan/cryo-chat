@@ -8,6 +8,7 @@ import { MessageList } from "./MessageList";
 import { MessageComposer } from "./MessageComposer";
 import type { MessageAttachment } from "@cryo/shared";
 import { ShareRoom } from "./ShareRoom";
+import { RoomSettings } from "./RoomSettings";
 
 interface Props {
   state: RoomState;
@@ -22,6 +23,7 @@ export function ChatRoom({ state, actions }: Props) {
   const { inset } = useKeyboardInset();
   const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
   const [replyTarget, setReplyTarget] = useState<PublicMessage | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const onHeightChange = useCallback((h: number) => setComposerHeight(h), []);
 
@@ -64,7 +66,16 @@ export function ChatRoom({ state, actions }: Props) {
         onClose={actions.closeRoom}
         onClearChat={actions.clearChat}
         onRenameParticipant={actions.renameParticipant}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
+      {settingsOpen && (
+        <RoomSettings
+          room={room}
+          onClose={() => setSettingsOpen(false)}
+          onSetPrivate={actions.setRoomPrivate}
+          onMakePublic={actions.makeRoomPublic}
+        />
+      )}
 
       <div className="flex-1 overflow-hidden">
         {messages.length === 0 ? (

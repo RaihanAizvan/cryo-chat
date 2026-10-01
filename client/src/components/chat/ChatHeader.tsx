@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PublicRoom, Participant } from "@cryo/shared";
-import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX, IconEdit, IconTrash } from "../ui/Icon";
+import { IconBack, IconDots, IconCopy, IconCheck, IconLink, IconX, IconEdit, IconTrash, IconLock, IconUnlock } from "../ui/Icon";
 import { Avatar } from "../ui/Avatar";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { roomShareLink } from "../../lib/shareLink";
@@ -24,13 +24,15 @@ interface Props {
   participants: Participant[];
   selfId: string | null;
   notice: string | null;
-  /** IDs of participants currently typing (persistent room). */
+  /** IDs of participants currently typing (reserved room). */
   typing: string[] | null;
   onBack: () => void;
   onLeave: () => void;
   onClose: () => void;
   onClearChat: () => void;
   onRenameParticipant: (participantId: string, name: string) => void;
+  /** Opens the host-only room settings sheet. */
+  onOpenSettings: () => void;
 }
 
 export function ChatHeader({
@@ -45,6 +47,7 @@ export function ChatHeader({
   onClose,
   onClearChat,
   onRenameParticipant,
+  onOpenSettings,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
@@ -60,9 +63,9 @@ export function ChatHeader({
   // Seeded + persisted to localStorage so "last seen" survives leaving,
   // rejoining, and page reloads.
   const [peer, setPeer] = useState<StoredPeer | null>(() =>
-    room.persistent ? getStoredPeer(room.code) : null,
+    room.reserved ? getStoredPeer(room.code) : null,
   );
-  const other = !room.persistent ? undefined : participants.find((p) => p.id !== selfId);
+  const other = !room.reserved ? undefined : participants.find((p) => p.id !== selfId);
 
   // Entering a different room must not leak the previous room's peer; reload
   // whatever we remember for the new space, and adopt whoever joins it.
@@ -73,7 +76,7 @@ export function ChatHeader({
     const [prevRoom, prevOther] = prevPeerKey.split("|");
     setPrevPeerKey(key);
     if (room.id !== prevRoom) {
-      setPeer(room.persistent ? getStoredPeer(room.code) : null);
+      setPeer(room.reserved ? getStoredPeer(room.code) : null);
     } else if (other && other.id !== prevOther) {
       setPeer((prev) =>
         prev && prev.id === other.id
@@ -85,9 +88,9 @@ export function ChatHeader({
 
   // Remember the latest sighting so "last seen" survives the peer leaving.
   useEffect(() => {
-    if (!room.persistent || !other) return;
+    if (!room.reserved || !other) return;
     storePeer(room.code, { id: other.id, name: other.name, color: other.color, lastSeen: Date.now() });
-  }, [room.persistent, room.code, other]);
+  }, [room.reserved, room.code, other]);
   const otherPresent = participants.some((p) => p.id !== selfId);
 
   const copy = async (kind: "link" | "code") => {
@@ -123,7 +126,7 @@ export function ChatHeader({
 
         {/* Room title */}
         <div className="flex min-w-0 flex-1 flex-col">
-          {room.persistent ? (
+          {room.reserved ? (
             /* The special space renders like a 1-on-1 chat: peer avatar, name,
                and a last-seen style presence line. No code, no member list. */
             <div className="flex min-w-0 items-center gap-2.5">
@@ -259,7 +262,26 @@ export function ChatHeader({
               )}
             </button>
             <div className="my-1 h-px bg-base-border" />
-            {room.persistent && peer && (
+            {room.isHost && (
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpenSettings();
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-ink transition-colors hover:bg-base-border"
+              >
+                {room.locked ? (
+                  <IconLock width={15} height={15} className="text-ink-muted" />
+                ) : (
+                  <IconUnlock width={15} height={15} className="text-ink-muted" />
+                )}
+                Room settings
+                <span className="ml-auto text-[10px] uppercase tracking-wider text-ink-faint">
+                  {room.locked ? "private" : "public"}
+                </span>
+              </button>
+            )}
+            {room.reserved && peer && (
               <button
                 onClick={() => {
                   const target =
@@ -323,7 +345,7 @@ export function ChatHeader({
                 {confirmingClose ? (
                   <div className="px-3 py-2">
                     <p className="mb-2 text-xs text-ink-muted">
-                      Close this space for everyone?
+                      Close this room for everyone?
                     </p>
                     <div className="flex gap-1.5">
                       <button
@@ -350,7 +372,7 @@ export function ChatHeader({
                     className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-300 transition-colors hover:bg-base-border"
                   >
                     <IconX width={15} height={15} className="text-rose-300" />
-                    Close space
+                    Close room
                   </button>
                 )}
                 <div className="my-1 h-px bg-base-border" />

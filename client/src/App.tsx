@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useChatRoom } from "./hooks/useChatRoom";
 import { LandingScreen } from "./components/landing/LandingScreen";
 import { ChatRoom } from "./components/chat/ChatRoom";
-import { ReservedPassword } from "./components/landing/ReservedPassword";
+import { RoomPassword } from "./components/landing/RoomPassword";
 import { Modal } from "./components/ui/Modal";
 import { IconAlertTriangle } from "./components/ui/Icon";
 import { AdminApp } from "./admin/AdminApp";
@@ -88,10 +88,11 @@ function ChatApp() {
 
       {/* A room asked for its password and this device has no valid token. */}
       {state.passwordPrompt && (
-        <ReservedPassword
+        <RoomPassword
           code={state.passwordPrompt.code}
           error={state.passwordPrompt.error}
           busy={state.passwordPrompt.busy}
+          retryAfterSeconds={state.passwordPrompt.retryAfterSeconds}
           onSubmit={actions.submitPassword}
           onClose={actions.cancelPassword}
         />

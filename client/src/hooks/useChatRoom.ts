@@ -30,7 +30,13 @@ export interface RoomState {
    * Password prompt for a protected room. `error` is set only when a password
    * was actually rejected — being asked for one is not an error.
    */
-  passwordPrompt: { code: string; error: string | null; busy: boolean } | null;
+  passwordPrompt: {
+    code: string;
+    error: string | null;
+    busy: boolean;
+    /** Seconds left on the server-side rate limit; 0 when not throttled. */
+    retryAfterSeconds: number;
+  } | null;
   /** Participant IDs currently typing (auto-clears after a timeout). */
   typingParticipants: string[];
   /** Per-participant last-read message id (read receipts). */
@@ -47,6 +53,8 @@ export interface RoomActions {
   sendSeen: () => void;
   clearChat: () => void;
   renameParticipant: (participantId: string, name: string) => void;
+  setRoomPrivate: (password: string, passwordExpiresAt: number) => Promise<void>;
+  makeRoomPublic: () => Promise<void>;
   clearNotice: () => void;
   clearJoinError: () => void;
   dismissAlert: () => void;
@@ -72,6 +80,12 @@ export function useChatRoom(): [RoomState, RoomActions] {
   const messagesRef = useRef<PublicMessage[]>([]);
   const seenByRef = useRef<Record<string, string>>({});
   const passwordPromptRef = useRef<RoomState["passwordPrompt"]>(null);
+  /**
+   * Resolver for the one in-flight privacy request, so the settings modal can
+   * await a real server answer instead of guessing. One at a time: the modal is
+   * a single form, and a second edit cannot start before the first resolves.
+   */
+  const privacyPending = useRef<((error: Error | null) => void) | null>(null);
   useEffect(() => {
     passwordPromptRef.current = passwordPrompt;
   }, [passwordPrompt]);
@@ -284,6 +298,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
               ...passwordPromptRef.current,
               error: err.message,
               busy: false,
+              retryAfterSeconds: err.retryAfterSeconds ?? 0,
             });
           }
           break;
@@ -301,8 +316,23 @@ export function useChatRoom(): [RoomState, RoomActions] {
             error:
               err.code === "room_password_invalid" ? "That password isn't right." : null,
             busy: false,
+            retryAfterSeconds: 0,
           });
           return;
+        }
+        case "room_password_rejected": {
+          // The host's own change bounced. Report it in the settings modal and
+          // leave the room exactly as it was.
+          privacyPending.current?.(new Error(err.message));
+          privacyPending.current = null;
+          break;
+        }
+        case "not_host": {
+          // Host left or moved on while the menu was open. Nothing changed.
+          privacyPending.current?.(new Error(err.message));
+          privacyPending.current = null;
+          setNotice("Only the host can change this room.");
+          break;
         }
         case "room_not_found":
           // Join-by-code missed → create the room with that exact code instead
@@ -341,6 +371,21 @@ export function useChatRoom(): [RoomState, RoomActions] {
       }
     };
 
+    /**
+     * The room's privacy changed. `room:joined` is not re-sent, so patch the
+     * snapshot we hold — otherwise the header keeps claiming a room is public
+     * after the host has just locked it.
+     */
+    const onPrivacy = (p: { roomId: string; locked: boolean; passwordExpiresAt: number }) => {
+      const r = roomRef.current;
+      if (!r || r.id !== p.roomId) return;
+      const next = { ...r, locked: p.locked, passwordExpiresAt: p.passwordExpiresAt };
+      roomRef.current = next;
+      setRoom(next);
+      privacyPending.current?.(null);
+      privacyPending.current = null;
+    };
+
     socket.on("room:joined", onJoined);
     socket.on("message:history", onHistory);
     socket.on("message:new", onMessage);
@@ -365,11 +410,15 @@ export function useChatRoom(): [RoomState, RoomActions] {
         ...prompt,
         error: "Lost connection. Try again.",
         busy: false,
+        retryAfterSeconds: 0,
       });
     };
     socket.on("disconnect", onDisconnect);
 
+    socket.on("room:privacy", onPrivacy);
+
     return () => {
+      socket.off("room:privacy", onPrivacy);
       socket.off("room:joined", onJoined);
       socket.off("message:history", onHistory);
       socket.off("message:new", onMessage);
@@ -418,7 +467,7 @@ export function useChatRoom(): [RoomState, RoomActions] {
     // Hold the prompt open with a spinner until the server answers: entering a
     // password is a round trip, and a modal that closes on click reads as if
     // nothing happened.
-    setPasswordPrompt({ ...prompt, error: null, busy: true });
+    setPasswordPrompt({ ...prompt, error: null, busy: true, retryAfterSeconds: 0 });
     socket.emit("room:join", { code: prompt.code, password });
   }, []);
 
@@ -477,6 +526,32 @@ export function useChatRoom(): [RoomState, RoomActions] {
     const r = roomRef.current;
     if (!r) return;
     socket.emit("room:rename", { roomId: r.id, participantId, name });
+  }, []);
+
+  /**
+   * Host-only privacy changes. These await the server's `room:privacy` echo so
+   * the modal can show a spinner and a real error rather than closing on click
+   * and leaving the user wondering whether it took.
+   */
+  const setRoomPrivate = useCallback((password: string, passwordExpiresAt: number) => {
+    const r = roomRef.current;
+    if (!r) return Promise.reject(new Error("Not in a room."));
+    return new Promise<void>((resolve, reject) => {
+      privacyPending.current = (error) => (error ? reject(error) : resolve());
+      socket.emit("room:privacy", { roomId: r.id, password, passwordExpiresAt });
+    });
+  }, []);
+
+  const makeRoomPublic = useCallback(() => {
+    const r = roomRef.current;
+    if (!r) return Promise.reject(new Error("Not in a room."));
+    // Our own saved token stops being useful the moment the password goes, and
+    // a stale one would make the next private room on this device try to fail.
+    clearRoomKey(r.code);
+    return new Promise<void>((resolve, reject) => {
+      privacyPending.current = (error) => (error ? reject(error) : resolve());
+      socket.emit("room:privacy", { roomId: r.id, password: null });
+    });
   }, []);
 
   const sendMessage = useCallback(
@@ -539,6 +614,8 @@ export function useChatRoom(): [RoomState, RoomActions] {
       sendSeen,
       clearChat,
       renameParticipant: renameParticipantRoom,
+      setRoomPrivate,
+      makeRoomPublic,
       clearNotice,
       clearJoinError,
       dismissAlert,
